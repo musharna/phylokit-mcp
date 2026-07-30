@@ -1,13 +1,18 @@
 # phylokit-mcp
 
+[![ci](https://github.com/musharna/phylokit-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/musharna/phylokit-mcp/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
+[![python](https://img.shields.io/pypi/pyversions/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
+[![license](https://img.shields.io/pypi/l/phylokit-mcp)](LICENSE)
+
 Phylogenetic inference over MCP, driving IQ-TREE 2 through
 [piqtree](https://github.com/cogent3/piqtree).
 
 **A topology without support is not a result.** `infer_tree` always runs a
 bootstrap and always returns per-clade support. There is no flag to skip it.
 
-Status: **0.1.0**, released on PyPI. 5 tools, 62 tests against real IQ-TREE (no
-mocked engine), 10 mutation checks, and a real-process JSON-RPC handshake test.
+5 tools, 62 tests against real IQ-TREE (no mocked engine), 10 mutation checks,
+and a real-process JSON-RPC handshake test.
 
 ## Why the rule
 
