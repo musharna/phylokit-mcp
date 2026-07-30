@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A push to a PR branch would otherwise run this twice — once for the push and
+# once for the pull_request — billing two runs for one commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is the floor: piqtree publishes no wheels below it.
+        python-version: ["3.12", "3.13"]
+    steps:
+      # Both pinned to the highest floating major that ACTUALLY EXISTS, checked
+      # against the tag list rather than releases/latest. setup-uv has published
+      # a v9.0.0 release but no floating v8 or v9 tag, so `@v9` would fail to
+      # resolve — releases/latest can run ahead of the movable major.
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install
+        run: uv sync --python ${{ matrix.python-version }} --all-extras --dev
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Test
+        # No mocked engine anywhere in the suite, so this exercises real
+        # IQ-TREE. Bootstrap replicates dominate the runtime.
+        run: uv run pytest -q --durations=10

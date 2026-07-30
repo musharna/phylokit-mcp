@@ -1,0 +1,74 @@
+[project]
+name = "phylokit-mcp"
+version = "0.1.0"
+description = "MCP server for phylogenetic inference — never returns a topology without its support"
+readme = "README.md"
+# GPL-2.0-ONLY, and the "only" is load-bearing. piqtree declares
+# License-Expression: GPL-2.0-only (it wraps IQ-TREE 2), and GPL-2.0-only is
+# INCOMPATIBLE with GPL-3.0 — the two cannot be combined and redistributed. This
+# package imports piqtree directly, so the distributed combination must be
+# GPL-2.0-only. cogent3, the other direct dependency, is BSD and imposes nothing.
+license = "GPL-2.0-only"
+# piqtree publishes wheels for 3.12+ only, and it is the engine. Claiming 3.11
+# would mean claiming a Python the server cannot actually run on.
+requires-python = ">=3.12"
+authors = [{ name = "Jaret Arnold" }]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "phylogenetics",
+    "iqtree",
+    "bootstrap",
+    "maximum-likelihood",
+    "bioinformatics",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    # 1.28.1 is a SECURITY floor, not a feature floor.
+    "mcp>=1.28.1,<2",
+    "piqtree>=0.8,<0.9",
+    "numpy>=1.26",
+]
+
+[project.urls]
+Homepage = "https://github.com/musharna/phylokit-mcp"
+Repository = "https://github.com/musharna/phylokit-mcp"
+Issues = "https://github.com/musharna/phylokit-mcp/issues"
+
+[project.scripts]
+phylokit-mcp = "phylokit_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/phylokit_mcp"]
+
+[tool.hatch.build.targets.sdist]
+# hatchling's `packages` covers the WHEEL ONLY. Without an explicit allow-list
+# the sdist packs .claude/ and docs/. Verify with `tar tzf`, not `git ls-files`.
+include = [
+    "src/**",
+    "tests/**",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+exclude = [".claude", "docs", "dist"]
+
+[tool.ruff]
+# ruff formats Python code blocks embedded in Markdown; docs/ holds the design
+# record, whose quoted snippets must not be rewritten.
+extend-exclude = ["docs"]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.6"]
