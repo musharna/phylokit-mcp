@@ -4,6 +4,39 @@ All notable changes to `phylokit-mcp` are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Migrated to `mcp` 2.x.** `mcp.server.fastmcp` no longer exists in 2.0.0, but
+  `FastMCP` was **renamed, not removed** — it is now
+  `mcp.server.mcpserver.MCPServer`, the same class with the same decorator and
+  the same `annotations` / `structured_output` kwargs. `ToolError` moved to
+  `mcp.server.mcpserver.exceptions`; `mcp.types.ToolAnnotations` did not move.
+
+  The dependency moves to `mcp>=2,<3` rather than widening to `<3`. This package
+  imports `mcp.server.mcpserver`, which does not exist in 1.x, so a range
+  spanning both majors could resolve to a version that cannot import the server.
+  The old 1.28.1 floor was a security floor, not a feature one, and every 2.x
+  release is above it.
+
+- **`mcp.types` field names went camelCase → snake_case** (`inputSchema` →
+  `input_schema`). This touched a test assertion, not the server.
+
+### Fixed
+
+- **`__version__` is read from installed metadata instead of restated.** It was a
+  literal beside a `pyproject.toml` version, with nothing enforcing agreement.
+  They agreed here — but `plantcv-mcp` shipped 0.2.0 reporting `"0.1.0"` from
+  exactly that arrangement, so this is a latent form of a defect that has already
+  shipped elsewhere.
+
+  There was no version test at all; `tests/test_version.py` now compares the
+  reported version against what `pyproject.toml` declares. Deliberately not
+  against `importlib.metadata`, which is what `__version__` now reads _from_ —
+  asserting those agree would compare a value to itself. Confirmed to fail on a
+  reintroduced literal before being kept.
+
 ## [0.1.0] — 2026-07-30
 
 Phase 1. Phylogenetic inference over MCP, driving IQ-TREE 2 through piqtree 0.8.3.

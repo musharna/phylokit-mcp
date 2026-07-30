@@ -18,7 +18,11 @@ from . import engine  # noqa: I001
 # version where the typing_extensions backport would be required.
 from typing import Any, NotRequired, TypedDict
 
-from mcp.server.fastmcp import FastMCP
+# mcp 2.x renamed FastMCP to MCPServer and moved it out of mcp.server.fastmcp,
+# which no longer exists. The class is the same one — same decorator, same
+# `annotations` and `structured_output` kwargs — so this is a rename, not a
+# rewrite. ToolAnnotations below did not move.
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from . import alignment as aln_mod
@@ -73,7 +77,7 @@ infers trees; it does not align sequences, and it will refuse ragged input
 rather than guess.
 """
 
-mcp = FastMCP("phylokit-mcp", instructions=INSTRUCTIONS)
+mcp = MCPServer("phylokit-mcp", instructions=INSTRUCTIONS)
 
 _READ_ONLY = ToolAnnotations(
     readOnlyHint=True, idempotentHint=True, openWorldHint=False

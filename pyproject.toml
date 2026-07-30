@@ -31,8 +31,12 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dependencies = [
-    # 1.28.1 is a SECURITY floor, not a feature floor.
-    "mcp>=1.28.1,<2",
+    # 2.x only. The 1.x floor was 1.28.1, a SECURITY floor rather than a feature
+    # one; every 2.x release is above it, so nothing is lost by moving the range
+    # rather than widening it. This package imports mcp.server.mcpserver, which
+    # does not exist in 1.x, so a range spanning both majors could resolve to a
+    # version that cannot import the server.
+    "mcp>=2,<3",
     "piqtree>=0.8,<0.9",
     "numpy>=1.26",
 ]
