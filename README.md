@@ -6,7 +6,7 @@ Phylogenetic inference over MCP, driving IQ-TREE 2 through
 **A topology without support is not a result.** `infer_tree` always runs a
 bootstrap and always returns per-clade support. There is no flag to skip it.
 
-Status: **0.1.0**, not yet released. 5 tools, 62 tests against real IQ-TREE (no
+Status: **0.1.0**, released on PyPI. 5 tools, 62 tests against real IQ-TREE (no
 mocked engine), 10 mutation checks, and a real-process JSON-RPC handshake test.
 
 ## Why the rule

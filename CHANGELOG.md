@@ -4,7 +4,7 @@ All notable changes to `phylokit-mcp` are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] — 2026-07-30
 
 Phase 1. Phylogenetic inference over MCP, driving IQ-TREE 2 through piqtree 0.8.3.
 
