@@ -14,12 +14,53 @@ class of bug.
 from __future__ import annotations
 
 import json
+import selectors
 import subprocess
 import sys
+import tempfile
+import time
 
 import pytest
 
 TINY = ">a\nACGTACGTAA\n>b\nACGTACGTAA\n>c\nTCGAACGTAA\n>d\nTCGAACGTAA\n"
+
+HANDSHAKE_TIMEOUT = 180
+
+
+def _read_until(stdout, wanted, stderr_file, timeout=HANDSHAKE_TIMEOUT):
+    """Read JSON-RPC lines until every id in `wanted` has answered, or time out.
+
+    Returns as soon as the wanted ids arrive, so the caller can keep stdin open
+    until it actually has what it asked for.
+    """
+    sel = selectors.DefaultSelector()
+    sel.register(stdout, selectors.EVENT_READ)
+    responses: dict = {}
+    deadline = time.monotonic() + timeout
+    try:
+        while not wanted <= responses.keys():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not sel.select(timeout=remaining):
+                break
+            line = stdout.readline()
+            if not line:  # server closed stdout
+                break
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            msg = json.loads(line)
+            if "id" in msg:
+                responses[msg["id"]] = msg
+    finally:
+        sel.close()
+    if not wanted <= responses.keys():
+        stderr_file.seek(0)
+        missing = sorted(wanted - responses.keys())
+        raise AssertionError(
+            f"no response to id(s) {missing} within {timeout}s. "
+            f"got ids {sorted(responses)}. server stderr:\n{stderr_file.read()[-2000:]}"
+        )
+    return responses
 
 
 def test_the_real_entry_point_completes_an_mcp_handshake():
@@ -31,55 +72,73 @@ def test_the_real_entry_point_completes_an_mcp_handshake():
     crash during tool registration, or anything written to stdout at import
     (which would corrupt the JSON-RPC stream) all pass an importability check
     and fail a real client.
+
+    Driven as a request/response conversation rather than a batch dump. An
+    earlier version wrote all three messages, closed stdin immediately, and
+    parsed stdout after the process exited — which made answering `tools/list`
+    a race against the server's own EOF-triggered shutdown. It failed roughly
+    2 runs in 10 (measured), and CI caught it on a README-only commit. Nothing
+    about a *timeout* would have fixed that: the server was not slow, it was
+    already shutting down. stdin now stays open until the wanted ids arrive.
     """
-    requests = [
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "test", "version": "0"},
-            },
+    init = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
         },
-        {"jsonrpc": "2.0", "method": "notifications/initialized"},
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-    ]
-    payload = "".join(json.dumps(r) + "\n" for r in requests)
-    proc = subprocess.run(
-        [sys.executable, "-m", "phylokit_mcp.server"],
-        # check=False deliberately: the server's exit status when stdin closes
-        # is not the thing under test, and raising on it would mask the far more
-        # informative assertions on the JSON-RPC responses below.
-        check=False,
-        input=payload,
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    lines = [ln for ln in proc.stdout.splitlines() if ln.strip().startswith("{")]
-    assert lines, f"server produced no JSON-RPC output. stderr:\n{proc.stderr[-2000:]}"
-
-    responses = {}
-    for line in lines:
-        msg = json.loads(line)
-        if "id" in msg:
-            responses[msg["id"]] = msg
-
-    assert 1 in responses, "no response to initialize"
-    assert "result" in responses[1], responses[1]
-    assert responses[1]["result"]["serverInfo"]["name"] == "phylokit-mcp"
-
-    assert 2 in responses, "no response to tools/list"
-    names = {t["name"] for t in responses[2]["result"]["tools"]}
-    assert names == {
-        "infer_tree",
-        "select_substitution_model",
-        "compare_trees",
-        "simulate_alignment",
-        "capabilities",
     }
+    # stderr goes to a file, not a pipe nobody drains: a full stderr pipe would
+    # block the server mid-handshake and read as a protocol failure.
+    with tempfile.TemporaryFile(mode="w+") as stderr_file:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "phylokit_mcp.server"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr_file,
+            text=True,
+            bufsize=1,
+        )
+        # Popen with stdin/stdout=PIPE always supplies both; naming them locally
+        # is what lets a type checker see that.
+        stdin, stdout = proc.stdin, proc.stdout
+        assert stdin is not None and stdout is not None
+        try:
+            stdin.write(json.dumps(init) + "\n")
+            stdin.flush()
+            responses = _read_until(stdout, {1}, stderr_file)
+
+            assert "result" in responses[1], responses[1]
+            assert responses[1]["result"]["serverInfo"]["name"] == "phylokit-mcp"
+
+            for msg in (
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            ):
+                stdin.write(json.dumps(msg) + "\n")
+            stdin.flush()
+            responses |= _read_until(stdout, {2}, stderr_file)
+
+            names = {t["name"] for t in responses[2]["result"]["tools"]}
+            assert names == {
+                "infer_tree",
+                "select_substitution_model",
+                "compare_trees",
+                "simulate_alignment",
+                "capabilities",
+            }
+        finally:
+            # Only now is EOF safe — every response we needed is already in hand.
+            if not stdin.closed:
+                stdin.close()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=30)
 
 
 def test_every_tool_is_registered_with_a_schema():
