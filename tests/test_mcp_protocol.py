@@ -157,7 +157,10 @@ def test_every_tool_is_registered_with_a_schema():
         "capabilities",
     }
     for tool in tools:
-        assert tool.inputSchema, f"{tool.name} has no input schema"
+        # mcp 2.x renamed the Tool model's fields from camelCase to snake_case
+        # (inputSchema -> input_schema). The server needed no change for this;
+        # only assertions that read the model do.
+        assert tool.input_schema, f"{tool.name} has no input schema"
         assert tool.description, f"{tool.name} has no description"
 
 
@@ -203,7 +206,7 @@ def test_a_ragged_alignment_surfaces_as_a_tool_error_not_a_crash():
     taxon-count check while claiming to test raggedness.
     """
     import anyio
-    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp.server.mcpserver.exceptions import ToolError
 
     from phylokit_mcp.server import mcp
 
