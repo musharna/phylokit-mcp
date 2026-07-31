@@ -1,0 +1,39 @@
+{
+  "upload_type": "software",
+  "title": "phylokit-mcp: phylogenetic inference over the Model Context Protocol, never returning a topology without its support",
+  "description": "A Model Context Protocol (MCP) server for phylogenetic inference, driving IQ-TREE 2 through piqtree. It enforces one structural rule: a topology without support is not a result. Tree inference always runs a bootstrap and always returns per-clade support, with no flag to skip it. Threads are pinned before the engine is imported, because likelihood sums accumulate in a thread-dependent order and unpinned runs are not reproducible.",
+  "license": "GPL-2.0-only",
+  "creators": [
+    {
+      "name": "Arnold, Jaret",
+      "orcid": "0009-0003-4055-5238"
+    }
+  ],
+  "keywords": [
+    "phylogenetics",
+    "iqtree",
+    "bootstrap",
+    "maximum-likelihood",
+    "bioinformatics",
+    "model-context-protocol",
+    "mcp"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/musharna/phylokit-mcp",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://pypi.org/project/phylokit-mcp/",
+      "relation": "isIdenticalTo",
+      "scheme": "url"
+    },
+    {
+      "identifier": "10.1093/molbev/msaa015",
+      "relation": "requires",
+      "scheme": "doi"
+    }
+  ],
+  "access_right": "open"
+}

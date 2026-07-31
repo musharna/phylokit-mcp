@@ -1,0 +1,60 @@
+cff-version: 1.2.0
+message: >-
+  If you use phylokit-mcp in your work, please cite it as below. IQ-TREE 2 is the
+  inference engine this server drives and must be cited separately — see
+  references.
+title: phylokit-mcp
+abstract: >-
+  A Model Context Protocol (MCP) server for phylogenetic inference, driving
+  IQ-TREE 2 through piqtree. It enforces one structural rule: a topology without
+  support is not a result. Tree inference always runs a bootstrap and always
+  returns per-clade support, with no flag to skip it. Threads are pinned before
+  the engine is imported, because likelihood sums accumulate in a
+  thread-dependent order and unpinned runs are not reproducible.
+type: software
+authors:
+  - family-names: Arnold
+    given-names: Jaret
+    orcid: "https://orcid.org/0009-0003-4055-5238"
+repository-code: "https://github.com/musharna/phylokit-mcp"
+url: "https://pypi.org/project/phylokit-mcp/"
+license: GPL-2.0-only
+version: 0.2.1
+date-released: "2026-07-31"
+keywords:
+  - phylogenetics
+  - iqtree
+  - bootstrap
+  - maximum-likelihood
+  - bioinformatics
+  - model-context-protocol
+  - mcp
+references:
+  - type: article
+    title: "IQ-TREE 2: New Models and Efficient Methods for Phylogenetic Inference in the Genomic Era"
+    authors:
+      - family-names: Minh
+        given-names: Bui Quang
+      - family-names: Schmidt
+        given-names: Heiko A.
+      - family-names: Chernomor
+        given-names: Olga
+      - family-names: Schrempf
+        given-names: Dominik
+      - family-names: Woodhams
+        given-names: Michael D.
+      - family-names: von Haeseler
+        given-names: Arndt
+      - family-names: Lanfear
+        given-names: Robert
+    journal: Molecular Biology and Evolution
+    volume: 37
+    issue: 5
+    year: 2020
+    doi: 10.1093/molbev/msaa015
+    notes: >-
+      The inference engine this server drives, and academic software that expects
+      to be cited. Cite IQ-TREE 2 — and the substitution-model selection or
+      bootstrap method actually used — for any published result; citing the
+      wrapper does not discharge that. A corrigendum exists at
+      10.1093/molbev/msaa131.
