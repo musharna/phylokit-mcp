@@ -1,0 +1,48 @@
+phylokit-mcp
+Copyright (c) 2026 Jaret Arnold
+Licensed under the GNU General Public License v2.0 only. See LICENSE.
+
+--------------------------------------------------------------------------------
+Why GPL-2.0-only, and why the "only" is load-bearing
+--------------------------------------------------------------------------------
+
+This project imports piqtree, which declares GPL-2.0-only — without the "or any
+later version" clause. A work combining GPL-2.0-only code cannot be relicensed
+forward to GPL-3.0, so this project is GPL-2.0-only too. That is a consequence of
+the dependency, not a preference: the sibling servers in this family are MIT and
+GPL-3.0-or-later respectively, each set by what they link against.
+
+--------------------------------------------------------------------------------
+Third-party dependencies
+--------------------------------------------------------------------------------
+
+    piqtree   — https://github.com/cogent3/piqtree
+    License   — GPL-2.0-only
+
+    IQ-TREE 2 — http://www.iqtree.org/
+    Source    — https://github.com/iqtree/iqtree2
+    License   — GPL-2.0
+
+--------------------------------------------------------------------------------
+Citation
+--------------------------------------------------------------------------------
+
+IQ-TREE 2 is academic software and expects to be cited when used in published
+work. This server drives it; it does not replace that obligation. If results from
+this tool appear in a publication, cite IQ-TREE 2 — and the substitution-model
+selection or bootstrap method actually used — as directed at
+http://www.iqtree.org/, not this wrapper.
+
+Author and institution details are deliberately not restated here. They belong to
+the upstream project, which publishes its own current citation; a hand-copied
+byline is exactly the kind of thing that goes stale or attributes the wrong
+people.
+
+--------------------------------------------------------------------------------
+Affiliation
+--------------------------------------------------------------------------------
+
+This project is an independent, UNOFFICIAL Model Context Protocol server. It is
+not affiliated with, endorsed by, or sponsored by the IQ-TREE authors or the
+cogent3 project. Package and project names are used only to identify the software
+this server drives.

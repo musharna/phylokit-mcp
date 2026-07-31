@@ -65,6 +65,7 @@ include = [
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
+    "NOTICE",
     "pyproject.toml",
 ]
 exclude = [".claude", "docs", "dist"]

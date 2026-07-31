@@ -106,3 +106,9 @@ near-tied topologies can flip on the last bits.
 **GPL-2.0-only.** The "only" is load-bearing: piqtree declares `GPL-2.0-only`,
 which is _incompatible_ with GPL-3.0, so the distributed combination cannot be
 GPL-3. cogent3 is BSD and imposes nothing.
+
+Unofficial. Not affiliated with, endorsed by, or sponsored by the IQ-TREE authors
+or the cogent3 project. **IQ-TREE 2 is academic software and expects to be cited**
+— if results from this server appear in published work, cite IQ-TREE 2 as
+directed at [iqtree.org](http://www.iqtree.org/), not this wrapper. See
+[NOTICE](NOTICE).
