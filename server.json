@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.musharna/phylokit-mcp",
+  "title": "phylokit-mcp",
+  "description": "Phylogenetic inference via IQ-TREE 2 — never returns a topology without its support",
+  "websiteUrl": "https://github.com/musharna/phylokit-mcp",
+  "repository": {
+    "url": "https://github.com/musharna/phylokit-mcp",
+    "source": "github"
+  },
+  "version": "0.2.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "phylokit-mcp",
+      "version": "0.2.1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "OMP_NUM_THREADS",
+          "description": "Pinned so inference is reproducible; overriding it makes IQ-TREE runs non-deterministic.",
+          "isRequired": false
+        },
+        {
+          "name": "MKL_NUM_THREADS",
+          "description": "Pinned alongside OMP_NUM_THREADS for the same reproducibility reason.",
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "tool": "manual",
+      "version": "0.2.1"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 [project]
 name = "phylokit-mcp"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server for phylogenetic inference — never returns a topology without its support"
 readme = "README.md"
 # GPL-2.0-ONLY, and the "only" is load-bearing. piqtree declares

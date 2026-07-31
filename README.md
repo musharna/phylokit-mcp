@@ -5,6 +5,8 @@
 [![python](https://img.shields.io/pypi/pyversions/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
 [![license](https://img.shields.io/pypi/l/phylokit-mcp)](LICENSE)
 
+<!-- mcp-name: io.github.musharna/phylokit-mcp -->
+
 Phylogenetic inference over MCP, driving IQ-TREE 2 through
 [piqtree](https://github.com/cogent3/piqtree).
 
