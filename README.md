@@ -4,6 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
 [![python](https://img.shields.io/pypi/pyversions/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
 [![license](https://img.shields.io/pypi/l/phylokit-mcp)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21713870.svg)](https://doi.org/10.5281/zenodo.21713870)
 
 <!-- mcp-name: io.github.musharna/phylokit-mcp -->
 
