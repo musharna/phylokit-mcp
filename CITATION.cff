@@ -19,7 +19,7 @@ authors:
 repository-code: "https://github.com/musharna/phylokit-mcp"
 url: "https://pypi.org/project/phylokit-mcp/"
 license: GPL-2.0-only
-version: 0.2.1
+version: 0.2.2
 date-released: "2026-07-31"
 keywords:
   - phylogenetics
