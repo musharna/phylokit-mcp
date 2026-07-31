@@ -55,3 +55,20 @@ threshold can satisfy it by accident.
 is a guard on the guard: if that assertion ever starts failing, the fixture has
 stopped being hard and every support test below it is only measuring the easy
 regime, where support is 1.00 everywhere and nothing discriminates.
+
+
+## Protein alignments
+
+| mutant                                              | result |
+| --------------------------------------------------- | ------ |
+| moltype never reaches `build_tree` (always dna)      | RED    |
+| moltype never reaches `model_finder`                 | RED    |
+| parsimony signal always counted in the DNA alphabet  | RED    |
+| protein alphabet accepted under the `dna` default    | RED    |
+
+The first two are the ones that matter: they are what "the server accepted
+`sequence_type='protein'` and then quietly ran a nucleotide analysis" looks like
+from the inside. `test_a_protein_tree_is_built_with_a_protein_model` is only
+evidence because of its negative control — a nucleotide model on protein data
+RAISES, so building a tree at all proves the molecule type reached the engine.
+Without that control the test would pass for any model that happened to work.

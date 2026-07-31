@@ -68,9 +68,42 @@ def test_newick_hostile_names_are_refused():
         validate({"a,b": "ACGT", "b": "ACGT", "c": "ACGT", "d": "ACGT"})
 
 
-def test_protein_input_is_refused_rather_than_read_as_dna():
-    with pytest.raises(AlignmentError, match="nucleotide alignments only"):
-        validate({"a": "MKVLE", "b": "MKVLE", "c": "MKVLE", "d": "MKVLE"})
+def test_protein_input_is_refused_under_the_dna_default_and_names_the_remedy():
+    """Still refused by default — but protein is now SUPPORTED, so the error has
+    to point at the flag instead of declaring the whole molecule out of scope."""
+    protein = {"a": "MKVLE", "b": "MKVLE", "c": "MKVLE", "d": "MKVLE"}
+    with pytest.raises(AlignmentError, match="sequence_type='protein'"):
+        validate(protein)
+
+    # Positive control: the same sequences validate once declared as protein.
+    validate(protein, "protein")
+
+
+def test_the_molecule_type_is_never_inferred():
+    """An alignment of only A/C/G/T is a VALID protein alignment (Ala/Cys/Gly/Thr).
+
+    Nothing here sniffs, precisely because that case exists: a nucleotide model
+    fitted to protein data would return a tree, a likelihood and support values,
+    all of them wrong and none of them complaining.
+    """
+    ambiguous = {"a": "ACGT", "b": "ACGA", "c": "ACGT", "d": "AAGT"}
+    validate(ambiguous, "dna")
+    validate(ambiguous, "protein")  # accepted under BOTH — so it cannot be guessed
+
+
+def test_parsimony_signal_is_counted_in_the_declared_alphabet():
+    """Counting only ACGTU would score EVERY protein alignment as zero-signal.
+
+    The thin_information advisory is built on this number, so a hardcoded
+    nucleotide alphabet would make it refuse valid protein data while appearing
+    to have measured it.
+    """
+    from phylokit_mcp.alignment import parsimony_informative
+
+    protein = {"a": "MKVL", "b": "MKVL", "c": "MRVL", "d": "MRVL"}
+    assert parsimony_informative(protein, "protein") == 1
+    # The same alignment scored as DNA sees no recognised states at all.
+    assert parsimony_informative(protein, "dna") == 0
 
 
 def test_parsimony_informative_ignores_singletons():

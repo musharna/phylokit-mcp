@@ -27,7 +27,13 @@ from mcp.types import ToolAnnotations
 
 from . import alignment as aln_mod
 from . import diagnostics
-from .alignment import AlignmentError, parse_fasta, summarise, validate
+from .alignment import (
+    MOLTYPES,
+    AlignmentError,
+    parse_fasta,
+    summarise,
+    validate,
+)
 from .bootstrap import (
     DEFAULT_REPLICATES,
     MAX_REPLICATES,
@@ -170,9 +176,13 @@ class CapabilitiesResult(TypedDict):
     threads_pinned: bool
 
 
-def _load(fasta: str) -> dict[str, str]:
+def _load(fasta: str, sequence_type: str = "dna") -> dict[str, str]:
+    if sequence_type not in MOLTYPES:
+        raise AlignmentError(
+            f"Unknown sequence_type {sequence_type!r}. Valid: {list(MOLTYPES)}."
+        )
     seqs = parse_fasta(fasta)
-    validate(seqs)
+    validate(seqs, sequence_type)
     return seqs
 
 
@@ -205,6 +215,7 @@ def infer_tree(
     model: str = "GTR+G",
     replicates: int = DEFAULT_REPLICATES,
     seed: int = 1,
+    sequence_type: str = "dna",
 ) -> TreeResult:
     """Build a maximum-likelihood tree and measure how well the data support it.
 
@@ -219,11 +230,19 @@ def infer_tree(
         replicates: Bootstrap replicates (20-1000). Cost is roughly linear in
             this, so 100 is a reasonable default and 1000 is for a final answer.
         seed: Fixes both the resampling and the engine's search.
+        sequence_type: "dna" (default) or "protein". DECLARED, never sniffed: an
+            alignment of only A/C/G/T is a valid protein alignment too, so
+            guessing would silently fit a nucleotide model to protein data. A
+            protein alignment also needs a protein model — "LG+G" or "WAG",
+            not the nucleotide default — so run select_substitution_model with
+            the same sequence_type first.
     """
-    seqs = _load(fasta)
-    stats = summarise(seqs)
-    tree = build_ml_tree(seqs, model, seed=seed)
-    support = bootstrap_support(seqs, tree, model, replicates=replicates, seed=seed)
+    seqs = _load(fasta, sequence_type)
+    stats = summarise(seqs, sequence_type)
+    tree = build_ml_tree(seqs, model, seed=seed, moltype=sequence_type)
+    support = bootstrap_support(
+        seqs, tree, model, replicates=replicates, seed=seed, moltype=sequence_type
+    )
     by_clade = {c.as_dict()["clade"]: c.support for c in support.clades}
     return TreeResult(
         newick=tree.get_newick(with_distances=True),
@@ -245,7 +264,11 @@ def infer_tree(
     structured_output=True,
 )
 def select_substitution_model(
-    fasta: str, criterion: str = "AIC", seed: int = 1, top_n: int = 5
+    fasta: str,
+    criterion: str = "AIC",
+    seed: int = 1,
+    top_n: int = 5,
+    sequence_type: str = "dna",
 ) -> ModelResult:
     """Compare substitution models and report how much the winner won by.
 
@@ -257,10 +280,14 @@ def select_substitution_model(
         criterion: "AIC", "AICc" or "BIC". BIC penalises parameters more heavily.
         seed: Fixes the engine's search.
         top_n: How many ranked models to return.
+        sequence_type: "dna" (default) or "protein". Ranks within that molecule
+            type's model set — nucleotide and protein models are not comparable.
     """
-    seqs = _load(fasta)
-    stats = summarise(seqs)
-    selection = select_model(seqs, criterion=criterion, seed=seed, top_n=top_n)
+    seqs = _load(fasta, sequence_type)
+    stats = summarise(seqs, sequence_type)
+    selection = select_model(
+        seqs, criterion=criterion, seed=seed, top_n=top_n, moltype=sequence_type
+    )
     return ModelResult(
         **selection,  # type: ignore[typeddict-item]
         alignment=stats.__dict__,  # type: ignore[typeddict-item]

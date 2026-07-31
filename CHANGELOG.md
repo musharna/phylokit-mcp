@@ -4,6 +4,30 @@ All notable changes to `phylokit-mcp` are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Protein alignments.** `infer_tree` and `select_substitution_model` take
+  `sequence_type="protein"`; piqtree has supported protein models all along
+  (`available_models('protein')`) and this server refused them at the door.
+
+  **The molecule type is declared, never inferred.** An alignment of only A/C/G/T
+  is a perfectly valid protein alignment — alanine, cysteine, glycine, threonine
+  — so no amount of sniffing can separate the two cases. Guessing wrong fits a
+  nucleotide model to protein data and returns a tree, a likelihood and bootstrap
+  support, all wrong and none complaining. A test pins that ambiguity by
+  validating the same alignment successfully under BOTH types.
+
+### Fixed
+
+- **`parsimony_informative` counted states from a hardcoded `ACGTU`.** On a
+  protein alignment that scores every site as uninformative, so the
+  `thin_information` advisory would have refused valid protein data while
+  appearing to have measured it. The alphabet now follows the declared molecule
+  type. This was latent rather than user-visible before, because protein input
+  could not get that far.
+
 ## [0.2.2] — 2026-07-31
 
 ### Added
