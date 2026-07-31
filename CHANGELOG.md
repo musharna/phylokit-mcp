@@ -4,6 +4,42 @@ All notable changes to `phylokit-mcp` are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-07-31
+
+### Added
+
+- **Published to the official MCP registry** (`io.github.musharna/phylokit-mcp`)
+  via `server.json` and an OIDC workflow, so the server is discoverable from MCP
+  clients and directories rather than only from PyPI.
+
+  This needed a release rather than a docs commit. The registry proves PyPI
+  ownership by finding an `mcp-name` marker in the package README **as published
+  to PyPI**, and PyPI captures `long_description` at release time — so a marker
+  sitting on `main` verifies nothing. It is the same mechanism that kept
+  `plantcv-mcp`'s "Not published to PyPI" line live on its project page after the
+  fix had merged.
+
+- **`tests/test_registry_metadata.py`.** `server.json` states the version in
+  three places and nothing else makes them agree with `pyproject.toml`; a stale
+  one is rejected by the registry during a release, after the version is spent.
+  The README marker is checked against the name `server.json` declares, since
+  that exact string is what the registry greps for.
+
+  `server.json` also declares `OMP_NUM_THREADS` and `MKL_NUM_THREADS`, which this
+  server pins for reproducibility — a caller overriding them silently loses the
+  determinism the tool reports.
+
+### Notes
+
+No functional change. Tools, the mandatory bootstrap and dependency pins are
+identical to 0.2.0.
+
+Running the real `mcp-publisher validate` against `server.json` is what caught a
+100-character cap on `description` in the sibling `breedsim-mcp` — a constraint
+no schema read surfaced, and one that would otherwise have failed the publish
+after the version was already on PyPI. The workflow validates before
+authenticating for that reason.
+
 ## [0.2.0] — 2026-07-30
 
 ### Changed
