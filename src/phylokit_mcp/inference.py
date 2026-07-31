@@ -99,13 +99,17 @@ def rank_models(
 
 
 def select_model(
-    seqs: dict[str, str], criterion: str = "AIC", seed: int = 1, top_n: int = 5
+    seqs: dict[str, str],
+    criterion: str = "AIC",
+    seed: int = 1,
+    top_n: int = 5,
+    moltype: str = "dna",
 ) -> dict:
     """Rank substitution models, and say how much the winner actually won by."""
     from .alignment import to_cogent3
 
     n_sites = len(next(iter(seqs.values())))
-    result = piqtree().model_finder(to_cogent3(seqs), rand_seed=seed)
+    result = piqtree().model_finder(to_cogent3(seqs, moltype), rand_seed=seed)
     ranked = rank_models(result.model_stats, n_sites, criterion)
     if not ranked:
         raise RuntimeError("model_finder returned no scoreable models.")
@@ -124,10 +128,12 @@ def select_model(
     }
 
 
-def build_ml_tree(seqs: dict[str, str], model: str, seed: int = 1):
+def build_ml_tree(
+    seqs: dict[str, str], model: str, seed: int = 1, moltype: str = "dna"
+):
     from .alignment import to_cogent3
 
-    return piqtree().build_tree(to_cogent3(seqs), model, rand_seed=seed)
+    return piqtree().build_tree(to_cogent3(seqs, moltype), model, rand_seed=seed)
 
 
 def tree_log_likelihood(tree) -> float | None:

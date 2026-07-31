@@ -133,6 +133,7 @@ def bootstrap_support(
     model: str,
     replicates: int = DEFAULT_REPLICATES,
     seed: int = 1,
+    moltype: str = "dna",
 ) -> BootstrapResult:
     """Resample, rebuild, and count how often each clade reappears."""
     validate_replicates(replicates)
@@ -145,7 +146,7 @@ def bootstrap_support(
     rng = np.random.default_rng(seed)
     pt = piqtree()
     for _ in range(replicates):
-        replicate = to_cogent3(resample_columns(seqs, rng))
+        replicate = to_cogent3(resample_columns(seqs, rng), moltype)
         # The engine seed is held FIXED across replicates on purpose. The
         # randomness being measured is the resampling of sites, not the search
         # heuristic's starting point; varying both would fold search noise into

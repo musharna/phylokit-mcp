@@ -92,7 +92,12 @@ near-tied topologies can flip on the last bits.
 
 ## Limitations
 
-- **Nucleotide alignments only.** Protein and codon models are not exposed.
+- **Nucleotide and protein alignments.** Pass `sequence_type="protein"` and a
+  protein model (`LG`, `WAG`, …). Codon models are still not exposed.
+  The molecule type is **declared, never sniffed**: an alignment of only A/C/G/T
+  is a valid protein alignment too (Ala/Cys/Gly/Thr), so guessing would fit a
+  nucleotide model to protein data and return a tree, a likelihood and support
+  values that are all wrong and none of which complain.
 - **Bootstrap only** — no aLRT, no approximate Bayes, no UFBoot. Support is the
   nonparametric bootstrap (Felsenstein 1985), computed here rather than read back
   from IQ-TREE, because piqtree 0.8.3 runs `bootstrap_replicates` but does not

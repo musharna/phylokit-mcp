@@ -17,6 +17,17 @@ MAX_TAXA = 200
 MAX_SITES = 100_000
 
 _DNA = set("ACGTUN-?RYSWKMBDHVacgtunryswkmbdhv.")
+# IUPAC amino acids plus ambiguity (B, Z, J, X), stop (*) and gaps. U is
+# selenocysteine here and uracil in _DNA -- the same letter meaning different
+# things is exactly why the molecule type is declared rather than sniffed.
+_PROTEIN = set("ACDEFGHIKLMNPQRSTVWYBZJXUO*-?.acdefghiklmnpqrstvwybzjxuo")
+MOLTYPES: tuple[str, ...] = ("dna", "protein")
+# States that count toward parsimony signal, per molecule type. Ambiguity codes
+# and gaps are excluded from both: they are not evidence of a shared state.
+_INFORMATIVE_STATES = {
+    "dna": set("ACGTU"),
+    "protein": set("ACDEFGHIKLMNPQRSTVWY"),
+}
 _NAME_OK = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 
@@ -69,7 +80,7 @@ def parse_fasta(text: str) -> dict[str, str]:
     return seqs
 
 
-def validate(seqs: dict[str, str]) -> None:
+def validate(seqs: dict[str, str], moltype: str = "dna") -> None:
     """Reject inputs that would otherwise yield a confident, meaningless tree."""
     if len(seqs) < MIN_TAXA:
         raise AlignmentError(
@@ -114,21 +125,33 @@ def validate(seqs: dict[str, str]) -> None:
                 "underscore, dot or hyphen."
             )
 
-    bad = {c for s in seqs.values() for c in s} - _DNA
+    alphabet = _DNA if moltype == "dna" else _PROTEIN
+    bad = {c for s in seqs.values() for c in s} - alphabet
     if bad:
+        hint = (
+            " If this is a protein alignment, pass sequence_type='protein': the "
+            "molecule type is declared, never guessed, because an alignment of "
+            "only A/C/G/T is a valid protein alignment too and guessing wrong "
+            "silently fits the wrong substitution model."
+            if moltype == "dna"
+            else ""
+        )
         raise AlignmentError(
-            f"Unrecognised characters for DNA: {sorted(bad)[:8]}. This server "
-            "currently handles nucleotide alignments only."
+            f"Unrecognised characters for {moltype}: {sorted(bad)[:8]}.{hint}"
         )
 
 
-def parsimony_informative(seqs: dict[str, str]) -> int:
+def parsimony_informative(seqs: dict[str, str], moltype: str = "dna") -> int:
     """Count sites with >=2 states each seen in >=2 taxa.
 
     This, not alignment length, is the quantity that carries topological signal.
     A 10,000-site alignment of near-identical sequences supports nothing, and
     reporting its length would imply otherwise.
     """
+    # Hardcoding "ACGTU" here would count ZERO informative sites in every
+    # protein alignment, so the low-signal guard would refuse valid data while
+    # appearing to have measured it.
+    states = _INFORMATIVE_STATES[moltype]
     names = list(seqs)
     n_sites = len(seqs[names[0]])
     count = 0
@@ -136,7 +159,7 @@ def parsimony_informative(seqs: dict[str, str]) -> int:
         tally: dict[str, int] = {}
         for nm in names:
             ch = seqs[nm][i].upper()
-            if ch in "ACGTU":
+            if ch in states:
                 tally[ch] = tally.get(ch, 0) + 1
         if sum(1 for v in tally.values() if v >= 2) >= 2:
             count += 1
@@ -158,21 +181,25 @@ def duplicate_groups(seqs: dict[str, str]) -> list[list[str]]:
     )
 
 
-def summarise(seqs: dict[str, str]) -> AlignmentStats:
+def summarise(seqs: dict[str, str], moltype: str = "dna") -> AlignmentStats:
     n_sites = len(next(iter(seqs.values())))
     total = sum(len(s) for s in seqs.values())
     gaps = sum(s.count("-") + s.count("?") for s in seqs.values())
     return AlignmentStats(
         n_taxa=len(seqs),
         n_sites=n_sites,
-        moltype="dna",
-        n_parsimony_informative=parsimony_informative(seqs),
+        moltype=moltype,
+        n_parsimony_informative=parsimony_informative(seqs, moltype),
         fraction_gaps=round(gaps / total, 4) if total else 0.0,
         duplicate_sequences=duplicate_groups(seqs),
     )
 
 
-def to_cogent3(seqs: dict[str, str]):
+def to_cogent3(seqs: dict[str, str], moltype: str = "dna"):
     from cogent3 import make_aligned_seqs
 
-    return make_aligned_seqs(seqs, moltype="dna")
+    if moltype not in MOLTYPES:
+        raise AlignmentError(
+            f"Unknown sequence_type {moltype!r}. Valid: {list(MOLTYPES)}."
+        )
+    return make_aligned_seqs(seqs, moltype=moltype)
