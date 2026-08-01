@@ -20,8 +20,8 @@ repository-code: "https://github.com/musharna/phylokit-mcp"
 doi: 10.5281/zenodo.21713870
 url: "https://pypi.org/project/phylokit-mcp/"
 license: GPL-2.0-only
-version: 0.2.2
-date-released: "2026-07-31"
+version: 0.3.0
+date-released: "2026-08-01"
 keywords:
   - phylogenetics
   - iqtree
