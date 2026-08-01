@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-01
+
 ### Added
 
 - **Protein alignments.** `infer_tree` and `select_substitution_model` take
@@ -19,7 +21,48 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   support, all wrong and none complaining. A test pins that ambiguity by
   validating the same alignment successfully under BOTH types.
 
+- **Topology recovery is now checked against a known simulated tree.** Sequences
+  are evolved along a tree this server never sees, and inference is asserted to
+  recover it. Every prior test compared the server against itself, so a change
+  that broke inference consistently would have kept them all green.
+
+  It ships with BUILT-IN NEGATIVE CONTROLS, and they earned their place
+  immediately: a blinded Robinson-Foulds comparator — one that had stopped
+  looking at the trees at all — was caught by the controls while the primary
+  "we recovered the tree" assertion passed happily, because RF = 0 reads as
+  perfect recovery whether you compared the right things or nothing at all.
+
+- **Every tree states the engine that built it and the units of its branch
+  lengths.** `engine` carries the piqtree/IQ-TREE version and
+  `branch_length_units` is `"substitutions per site"`. Newick carries bare
+  numbers, and reading those as time or as percent divergence gives a confidently
+  wrong answer; the units are not recoverable from the string. The engine version
+  was previously reachable only via the separate `capabilities` call, so a saved
+  tree was not self-describing — and a test asserts the two agree, because two
+  sources that can disagree are worse than one.
+
 ### Fixed
+
+- **A signal-free alignment now gets a diagnosis instead of an internal error.**
+  Four identical sequences reached IQ-TREE, which cannot fit a likelihood and
+  failed inside piqtree with `IQ-TREE output is malformed, likelihood not found`.
+  That message is upstream's and describes a PARSING failure, so a caller reads it
+  as this server being broken and retries — when the real answer is that the data
+  support every topology equally and no retry will change that. The condition is
+  knowable before the call, and is now checked there.
+
+  The check is deliberately NOT part of `validate`. That function answers "is this
+  a well-formed alignment", and a signal-free alignment is perfectly well formed;
+  `select_substitution_model` and the molecule-type checks have legitimate reasons
+  to accept one. Putting it in `validate` broke two existing tests whose minimal
+  fixtures were correct — the check was in the wrong layer, not the tests.
+
+- **Branch lengths pinned at the optimiser's ceiling are now flagged.** Saturated
+  data drive IQ-TREE to its upper bound of 10 substitutions per site, and lengths
+  of `9.9999989` were returned unremarked, indistinguishable from a measurement.
+  A `saturated_branch_lengths` advisory now names them and states the number is a
+  FLOOR rather than an estimate. The support warnings were already good; a
+  degenerate FIT had no equivalent.
 
 - **`parsimony_informative` counted states from a hardcoded `ACGTU`.** On a
   protein alignment that scores every site as uninformative, so the
