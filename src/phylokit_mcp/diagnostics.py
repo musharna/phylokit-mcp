@@ -147,6 +147,47 @@ def gappy_alignment(stats: AlignmentStats) -> dict | None:
     }
 
 
+# IQ-TREE optimises branch lengths against an upper bound of 10 substitutions
+# per site. A branch that arrives AT the bound was not estimated, it was stopped:
+# the true value is 10-or-more, and the likelihood surface is flat out there.
+# 9.9 is the trigger rather than 10.0 because the optimiser lands just below it.
+BRANCH_LENGTH_BOUND = 10.0
+_SATURATED_AT = 9.9
+
+
+def saturated_branch_lengths(newick: str) -> dict | None:
+    """Fires when a branch hit the optimiser's ceiling instead of converging.
+
+    The support warnings cover an unresolved TOPOLOGY. Nothing covered a
+    degenerate FIT, and the two are different failures: bootstrap support can be
+    high on a branch whose length is meaningless. Measured on 300bp of random
+    sequence, the inferred tree carried lengths of 9.9999989 — the ceiling to
+    seven decimal places — with no warning attached.
+    """
+    import re
+
+    lengths = [
+        float(x) for x in re.findall(r":([0-9]*\.?[0-9]+(?:[eE][-+]?\d+)?)", newick)
+    ]
+    hit = [ln for ln in lengths if ln >= _SATURATED_AT]
+    if not hit:
+        return None
+    return {
+        "code": "saturated_branch_lengths",
+        "message": (
+            f"{len(hit)} branch length(s) reached the optimiser's ceiling of "
+            f"{BRANCH_LENGTH_BOUND} substitutions per site (largest {max(hit):.4f}). "
+            "Those branches were not estimated, they were stopped there: the "
+            "sequences are so divergent along them that the likelihood no longer "
+            "distinguishes longer from longer still. Read them as 'at least "
+            f"{BRANCH_LENGTH_BOUND}', not as a measurement, and treat any distance "
+            "computed from this tree as a lower bound."
+        ),
+        "n_saturated": len(hit),
+        "max_branch_length": max(hit),
+    }
+
+
 def model_choice_is_close(selection: dict) -> dict | None:
     ties = selection.get("indistinguishable_from_best") or []
     if not ties:
@@ -197,8 +238,11 @@ def collect(
     result: BootstrapResult | None = None,
     selection: dict | None = None,
     pinned: bool = True,
+    newick: str | None = None,
 ) -> list[dict]:
     out: list[dict | None] = []
+    if newick:
+        out.append(saturated_branch_lengths(newick))
     if stats is not None:
         out += [
             thin_information(stats, result),

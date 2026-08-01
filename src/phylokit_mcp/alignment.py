@@ -141,6 +141,40 @@ def validate(seqs: dict[str, str], moltype: str = "dna") -> None:
         )
 
 
+def require_phylogenetic_signal(seqs: dict[str, str], moltype: str = "dna") -> None:
+    """Refuse an alignment that cannot support ANY tree.
+
+    Deliberately not part of `validate`. That function answers "is this a
+    well-formed alignment", and a signal-free alignment is perfectly well
+    formed — `select_substitution_model` and the molecule-type checks have
+    legitimate reasons to accept one. This asks the narrower question that only
+    tree inference needs answered, so it is called only there.
+
+    Without it, a signal-free alignment reaches IQ-TREE, which cannot fit a
+    likelihood and fails inside piqtree with "IQ-TREE output is malformed,
+    likelihood not found." That message is upstream's and describes a PARSING
+    failure, so a caller reads it as this server being broken and retries — when
+    the real answer is that the data cannot support a tree and no retry will
+    change it. The condition is knowable before the call.
+    """
+    if parsimony_informative(seqs, moltype) != 0:
+        return
+    groups = duplicate_groups(seqs)
+    identical = sum(len(g) for g in groups) == len(seqs) and len(groups) == 1
+    detail = (
+        f"All {len(seqs)} sequences are identical."
+        if identical
+        else "No site has two different states each appearing in two or more "
+        "sequences, so no site can distinguish one grouping from another."
+    )
+    raise AlignmentError(
+        f"This alignment carries no phylogenetic signal. {detail} Every topology "
+        "fits it equally well, so there is no tree to infer — this is a property "
+        "of the data, not a transient failure, and retrying will not change it. "
+        "Supply an alignment with variation shared across taxa."
+    )
+
+
 def parsimony_informative(seqs: dict[str, str], moltype: str = "dna") -> int:
     """Count sites with >=2 states each seen in >=2 taxa.
 

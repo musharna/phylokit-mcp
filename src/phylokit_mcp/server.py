@@ -31,6 +31,7 @@ from .alignment import (
     MOLTYPES,
     AlignmentError,
     parse_fasta,
+    require_phylogenetic_signal,
     summarise,
     validate,
 )
@@ -129,6 +130,14 @@ class TreeResult(TypedDict):
     alignment: AlignmentDict
     support: SupportDict
     reproducibility: dict[str, Any]
+    # Which engine produced this, travelling WITH the tree. The version was
+    # already reachable via `capabilities`, but a stored or forwarded newick
+    # could not say what built it, and two trees could not be told apart.
+    engine: dict[str, Any]
+    # Newick carries bare numbers after the colons. They are substitutions per
+    # site — not time, not percent divergence — and the distinction decides
+    # whether a distance read off this tree means anything.
+    branch_length_units: str
     warnings: list[dict[str, Any]]
 
 
@@ -238,22 +247,32 @@ def infer_tree(
             the same sequence_type first.
     """
     seqs = _load(fasta, sequence_type)
+    # Only tree inference needs this. `_load` is shared with tools that can
+    # legitimately work on a signal-free alignment, so the check lives here
+    # rather than inside validate().
+    require_phylogenetic_signal(seqs, sequence_type)
     stats = summarise(seqs, sequence_type)
     tree = build_ml_tree(seqs, model, seed=seed, moltype=sequence_type)
     support = bootstrap_support(
         seqs, tree, model, replicates=replicates, seed=seed, moltype=sequence_type
     )
     by_clade = {c.as_dict()["clade"]: c.support for c in support.clades}
+    newick = tree.get_newick(with_distances=True)
     return TreeResult(
-        newick=tree.get_newick(with_distances=True),
+        newick=newick,
         newick_with_support=_annotate(tree, by_clade, set(seqs)),
         model=model,
         log_likelihood=tree_log_likelihood(tree),
         alignment=stats.__dict__,  # type: ignore[typeddict-item]
         support=support.as_dict(),  # type: ignore[typeddict-item]
         reproducibility=engine.reproducibility(),
+        engine={"name": "IQ-TREE 2 via piqtree", "version": engine.engine_version()},
+        branch_length_units="substitutions per site",
         warnings=diagnostics.collect(
-            stats=stats, result=support, pinned=engine.threads_pinned()
+            stats=stats,
+            result=support,
+            pinned=engine.threads_pinned(),
+            newick=newick,
         ),
     )
 
