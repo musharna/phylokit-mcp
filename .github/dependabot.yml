@@ -30,18 +30,26 @@ updates:
       uv-minor-patch:
         update-types: ["minor", "patch"]
     ignore:
-      # piqtree is the inference engine and its range (>=0.8,<0.9) is deliberate,
-      # not incidental. Leaving it un-ignored made the whole uv update job FAIL
-      # with dependency_file_not_resolvable rather than merely skip this package:
-      # Dependabot re-resolves the universal marker space, and in the
-      # `python_full_version >= '3.14' and sys_platform == 'win32'` split there is
-      # no piqtree distribution at all, so no solution exists.
+      # numpy is capped BELOW its latest release by this project's own dependency
+      # chain: piqtree requires cogent3, and every cogent3 in range requires
+      # numpy<2.5. Our direct `numpy>=1.26` therefore has an effective ceiling it
+      # does not state, and Dependabot proposing numpy 2.5.x makes the whole uv
+      # job fail with dependency_file_not_resolvable rather than skip the package.
       #
-      # This is NOT a defect in the committed lockfile -- verified by deleting
-      # uv.lock and running a full `uv lock`, which resolves 56 packages cleanly
-      # and reproduces the committed file. The failure is specific to Dependabot
-      # attempting to move a pin this project holds on purpose.
+      # NOT capped in pyproject.toml on purpose. Duplicating cogent3's ceiling
+      # there would silently drift the moment cogent3 raises it -- the same
+      # reasoning that keeps opencv-python uncapped in the sibling plantcv-mcp.
+      # Drop this entry once cogent3 admits numpy>=2.5.
+      - dependency-name: "numpy"
+      # piqtree is the inference engine and its range (>=0.8,<0.9) is deliberate.
+      # Bumping it is a tested act -- it changes what IQ-TREE does -- so it belongs
+      # in a human-authored PR rather than an automated one.
       #
-      # Bumping the engine is a deliberate, tested act (piqtree changes what
-      # IQ-TREE does), so it belongs in a human-authored PR, not an automated one.
+      # Correction to the previous revision of this comment: it claimed the split
+      # `python_full_version >= '3.14' and sys_platform == 'win32'` had "no piqtree
+      # distribution at all". That is FALSE -- piqtree 0.8.3 publishes cp314
+      # win_amd64 wheels. The claim came from reading a TRUNCATED error message
+      # whose visible portion happened to name piqtree; the full resolver output
+      # shows the conflict is numpy vs cogent3, which is why ignoring piqtree
+      # alone did not fix the job.
       - dependency-name: "piqtree"
