@@ -29,3 +29,19 @@ updates:
     groups:
       uv-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # piqtree is the inference engine and its range (>=0.8,<0.9) is deliberate,
+      # not incidental. Leaving it un-ignored made the whole uv update job FAIL
+      # with dependency_file_not_resolvable rather than merely skip this package:
+      # Dependabot re-resolves the universal marker space, and in the
+      # `python_full_version >= '3.14' and sys_platform == 'win32'` split there is
+      # no piqtree distribution at all, so no solution exists.
+      #
+      # This is NOT a defect in the committed lockfile -- verified by deleting
+      # uv.lock and running a full `uv lock`, which resolves 56 packages cleanly
+      # and reproduces the committed file. The failure is specific to Dependabot
+      # attempting to move a pin this project holds on purpose.
+      #
+      # Bumping the engine is a deliberate, tested act (piqtree changes what
+      # IQ-TREE does), so it belongs in a human-authored PR, not an automated one.
+      - dependency-name: "piqtree"
