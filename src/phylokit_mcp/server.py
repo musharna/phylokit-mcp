@@ -84,10 +84,11 @@ infers trees; it does not align sequences, and it will refuse ragged input
 rather than guess.
 """
 
-mcp = MCPServer("phylokit-mcp", instructions=INSTRUCTIONS)
-
+# snake_case spellings. The camelCase aliases are still accepted as constructor
+# kwargs and build an EQUAL object -- measured, not assumed -- so this is a
+# consistency change with the sibling servers, not a bug fix.
 _READ_ONLY = ToolAnnotations(
-    readOnlyHint=True, idempotentHint=True, openWorldHint=False
+    read_only_hint=True, idempotent_hint=True, open_world_hint=False
 )
 
 
@@ -214,11 +215,6 @@ def _annotate(tree, support_by_clade: dict[str, float], tips: set[str]) -> str:
     return tree.get_newick(with_node_names=True, with_distances=True)
 
 
-@mcp.tool(
-    title="Infer a phylogenetic tree with bootstrap support",
-    annotations=_READ_ONLY,
-    structured_output=True,
-)
 def infer_tree(
     fasta: str,
     model: str = "GTR+G",
@@ -277,11 +273,6 @@ def infer_tree(
     )
 
 
-@mcp.tool(
-    title="Rank substitution models, with the margin over the runners-up",
-    annotations=_READ_ONLY,
-    structured_output=True,
-)
 def select_substitution_model(
     fasta: str,
     criterion: str = "AIC",
@@ -316,11 +307,6 @@ def select_substitution_model(
     )
 
 
-@mcp.tool(
-    title="Compare two tree topologies",
-    annotations=_READ_ONLY,
-    structured_output=True,
-)
 def compare_trees(newick_a: str, newick_b: str) -> CompareResult:
     """Robinson-Foulds distance between two trees, and which clades differ.
 
@@ -374,11 +360,6 @@ def compare_trees(newick_a: str, newick_b: str) -> CompareResult:
     )
 
 
-@mcp.tool(
-    title="Simulate an alignment from a known tree",
-    annotations=_READ_ONLY,
-    structured_output=True,
-)
 def simulate_alignment(
     newick: str, model: str = "JC", length: int = 500, seed: int = 1
 ) -> SimulationResult:
@@ -415,11 +396,6 @@ def simulate_alignment(
     )
 
 
-@mcp.tool(
-    title="Engine capabilities and limits",
-    annotations=_READ_ONLY,
-    structured_output=True,
-)
 def capabilities(include_models: bool = False) -> CapabilitiesResult:
     """What this server can do, and the bounds it enforces.
 
@@ -452,8 +428,51 @@ def capabilities(include_models: bool = False) -> CapabilitiesResult:
     return out
 
 
+def build_server() -> MCPServer:
+    """Construct a fresh server.
+
+    A factory rather than a module-level singleton, matching breedsim-mcp and
+    plantcv-mcp: a test that needs a server gets its own, and importing this
+    module no longer has the side effect of constructing one.
+
+    The tool functions stay at module level and are registered here. The sibling
+    servers nest their tool definitions inside this function, which they can do
+    because their tools are thin wrappers over logic that lives in other modules.
+    Here the tool functions ARE the implementation and are unit-tested by direct
+    import, so nesting them would make the logic unreachable. Registering instead
+    of nesting keeps both properties, and puts the whole tool surface in one place.
+    """
+    mcp = MCPServer("phylokit-mcp", instructions=INSTRUCTIONS)
+    mcp.tool(
+        title="Infer a phylogenetic tree with bootstrap support",
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )(infer_tree)
+    mcp.tool(
+        title="Rank substitution models, with the margin over the runners-up",
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )(select_substitution_model)
+    mcp.tool(
+        title="Compare two tree topologies",
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )(compare_trees)
+    mcp.tool(
+        title="Simulate an alignment from a known tree",
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )(simulate_alignment)
+    mcp.tool(
+        title="Engine capabilities and limits",
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )(capabilities)
+    return mcp
+
+
 def main() -> None:
-    mcp.run()
+    build_server().run()
 
 
 # `python -m phylokit_mcp.server` must work, not just the console script — it is
@@ -463,4 +482,4 @@ if __name__ == "__main__":
     main()
 
 
-__all__ = ["AlignmentError", "main", "mcp"]
+__all__ = ["AlignmentError", "build_server", "main"]

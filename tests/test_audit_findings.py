@@ -99,7 +99,9 @@ def _infer(fasta: str) -> dict:
     import asyncio
     import json
 
-    from phylokit_mcp.server import mcp
+    from phylokit_mcp.server import build_server
+
+    mcp = build_server()
 
     r = asyncio.run(mcp.call_tool("infer_tree", {"fasta": fasta, "seed": 1}))
     return json.loads(
@@ -124,7 +126,9 @@ def test_the_tree_carries_the_engine_that_built_it():
     import asyncio
     import json
 
-    from phylokit_mcp.server import mcp
+    from phylokit_mcp.server import build_server
+
+    mcp = build_server()
 
     cap = asyncio.run(mcp.call_tool("capabilities", {}))
     caps = json.loads(

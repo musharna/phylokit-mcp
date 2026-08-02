@@ -145,7 +145,9 @@ def test_every_tool_is_registered_with_a_schema():
     """Registration happens at import, so a bad annotation fails here, not in prod."""
     import anyio
 
-    from phylokit_mcp.server import mcp
+    from phylokit_mcp.server import build_server
+
+    mcp = build_server()
 
     tools = anyio.run(mcp.list_tools)
     names = {t.name for t in tools}
@@ -172,7 +174,9 @@ def test_repeated_tool_calls_succeed_in_one_server_process():
     """
     import anyio
 
-    from phylokit_mcp.server import mcp
+    from phylokit_mcp.server import build_server
+
+    mcp = build_server()
 
     async def run():
         results = []
@@ -208,7 +212,9 @@ def test_a_ragged_alignment_surfaces_as_a_tool_error_not_a_crash():
     import anyio
     from mcp.server.mcpserver.exceptions import ToolError
 
-    from phylokit_mcp.server import mcp
+    from phylokit_mcp.server import build_server
+
+    mcp = build_server()
 
     ragged = ">a\nACGTACGTAA\n>b\nACGTACGT\n>c\nTCGAACGTAA\n>d\nTCGAACGTAA\n"
 
@@ -219,3 +225,46 @@ def test_a_ragged_alignment_surfaces_as_a_tool_error_not_a_crash():
         return await mcp.call_tool("capabilities", {"include_models": False})
 
     assert anyio.run(run) is not None
+
+
+def test_build_server_returns_a_fresh_instance_each_call():
+    """The property the factory exists for.
+
+    Without this, `build_server` could quietly become a cached singleton again --
+    every other test would still pass, because they only ever need *a* server.
+    """
+    import anyio
+
+    from phylokit_mcp.server import build_server
+
+    a, b = build_server(), build_server()
+    assert a is not b, "build_server returned the same object twice"
+
+    # Positive control: `a is not b` is also satisfied by two EMPTY servers, so a
+    # constructor that registered nothing would pass the assertion above. Both
+    # instances must actually carry the full tool surface.
+    expected = {
+        "infer_tree",
+        "select_substitution_model",
+        "compare_trees",
+        "simulate_alignment",
+        "capabilities",
+    }
+    for srv in (a, b):
+        assert {t.name for t in anyio.run(srv.list_tools)} == expected
+
+
+def test_importing_the_module_does_not_construct_a_server():
+    """Importing must have no side effect of building a server.
+
+    This is the regression guard for the module-level `mcp = MCPServer(...)` this
+    package used to carry: a singleton built at import time is shared by every
+    test that touches the module, so state leaks between them in an order nothing
+    declares.
+    """
+    import phylokit_mcp.server as server_module
+
+    assert not hasattr(server_module, "mcp"), (
+        "phylokit_mcp.server has a module-level `mcp` again -- importing the "
+        "module now constructs a server, which is what build_server() replaced"
+    )
