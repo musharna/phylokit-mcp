@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest an improvement to phylokit-mcp
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This server wraps IQ-TREE 2 via piqtree. Features IQ-TREE does not expose to piqtree cannot be surfaced here — bootstrap support values are the known example.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the analysis you are trying to run and where the server gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should the tool accept or return? A sketch of the call and response helps.
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What are you doing instead today?
+    validations:
+      required: false

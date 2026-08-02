@@ -8,6 +8,38 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Community-health and repo-hygiene files, matching the standard set by
+  `data-aggregator-mcp` and `plant-genomics-mcp`.** An earlier parity audit
+  compared this repo only against `ldraw-mcp`, which is itself thin on these, so
+  the whole tier went unnoticed: `CONTRIBUTING.md`, `SECURITY.md`, issue forms
+  (bug report + feature request + a config pointing security reports at private
+  advisories), a pull-request template, `.editorconfig`, `.mcp.json`, `glama.json`,
+  a CodeQL workflow, and a Dependabot config.
+
+  **Dependabot uses the `uv` ecosystem, not `pip`.** This is a uv-locked project;
+  the pip ecosystem would update `pyproject.toml` and leave `uv.lock` stale, which
+  CI installs with `--frozen` and would fail on. Dependabot's native uv support
+  reads both together.
+
+  `CONTRIBUTING.md` and `SECURITY.md` were added to the sdist allow-list.
+  hatchling's allow-list drops anything unlisted **silently** — verified with
+  `tar tzf` on a real build rather than assumed, the same way a `NOTICE` was
+  previously found missing.
+
+  `SECURITY.md` documents this server's actual trust boundary: inference runs
+  in-process through piqtree with no subprocess and no shell, alignments arrive as
+  inline data rather than filesystem paths, and the realistic risk is resource
+  exhaustion rather than code execution.
+
+- **A "Configure your MCP client" section in the README.** This server had none at
+  all — the one section an MCP server's README cannot do without. It notes that
+  `uvx` must resolve a Python 3.12+ interpreter, since that is piqtree's wheel floor.
+
+- **README gained a Glama badge**, verified HTTP 200 with a bogus name as a
+  negative control.
+
+- **`project.urls` gained `Changelog`.**
+
 - **`server.json` is validated against the registry's own published schema.**
   `breedsim-mcp` v0.4.0 was tagged, uploaded to PyPI and GitHub-released before
   the MCP registry refused it with a 422: its description had grown past a
