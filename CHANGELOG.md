@@ -6,6 +6,37 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **The server is built by a `build_server()` factory instead of a module-level
+  singleton.** `phylokit_mcp.server` no longer constructs an `MCPServer` at import
+  time, so importing the module has no side effect and a test that needs a server
+  gets its own. This matches `breedsim-mcp` and `plantcv-mcp`, which already did
+  it; this package and `ldraw-mcp` were the outliers.
+
+  **The tool functions stay at module level** and are registered inside the
+  factory. The sibling servers nest their tool definitions instead, which they
+  can do because their tools are thin wrappers over logic living in other
+  modules. Here the tool functions *are* the implementation and are unit-tested
+  by direct import, so nesting them would put the logic out of reach. Registering
+  rather than nesting keeps both properties and collects the whole tool surface
+  in one readable block.
+
+  Two tests pin the property, because otherwise nothing stops the singleton
+  returning: one asserts two calls yield distinct, **fully populated** servers,
+  and one asserts the module has no `mcp` attribute. Both were seen to fail
+  against deliberate mutants — a reintroduced module-level singleton, a cached
+  factory, and a factory that registers no tools. That third mutant is why the
+  first test checks the tool surface: `a is not b` alone passes for two empty
+  servers.
+
+  Verified from an installed wheel, not just in-repo: 5 tools registered and the
+  `phylokit-mcp` console script still resolves.
+
+- `_READ_ONLY` now uses the snake_case `ToolAnnotations` spellings, matching the
+  sibling servers. **This is cosmetic, not a fix** — measured, the camelCase
+  aliases build an equal object with the same `read_only_hint` attribute.
+
 ### Added
 
 - **Community-health and repo-hygiene files, matching the standard set by
