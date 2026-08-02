@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "phylokit": {
+      "command": "uvx",
+      "args": [
+        "phylokit-mcp"
+      ]
+    }
+  }
+}

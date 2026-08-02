@@ -4,6 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
 [![python](https://img.shields.io/pypi/pyversions/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
 [![license](https://img.shields.io/pypi/l/phylokit-mcp)](LICENSE)
+[![Glama](https://glama.ai/mcp/servers/musharna/phylokit-mcp/badges/score.svg)](https://glama.ai/mcp/servers/musharna/phylokit-mcp)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21713870.svg)](https://doi.org/10.5281/zenodo.21713870)
 
 <!-- mcp-name: io.github.musharna/phylokit-mcp -->
@@ -68,6 +69,30 @@ pip install phylokit-mcp
 
 piqtree ships prebuilt wheels, so there is no compiler, no R and no conda step —
 but it requires **Python 3.12+**, and so does this package.
+
+## Configure your MCP client
+
+```json
+{
+  "mcpServers": {
+    "phylokit": {
+      "command": "uvx",
+      "args": ["phylokit-mcp"]
+    }
+  }
+}
+```
+
+`uvx` fetches the released package on demand, so this needs no prior install — but
+it must resolve a **Python 3.12+** interpreter, since that is piqtree's wheel floor.
+If `uvx` picks an older one, pin it with `"args": ["--python", "3.12", "phylokit-mcp"]`.
+
+If you installed it yourself instead, `"command": "phylokit-mcp"` works when the
+executable is on your `PATH`; give the absolute path to the entry point in the
+environment you installed into if it is not.
+
+The same file ships as [`.mcp.json`](.mcp.json) in this repo, which Claude Code
+picks up automatically when the repo is your working directory.
 
 ## Reproducibility, stated precisely
 

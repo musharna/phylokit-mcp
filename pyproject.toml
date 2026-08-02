@@ -45,6 +45,7 @@ dependencies = [
 Homepage = "https://github.com/musharna/phylokit-mcp"
 Repository = "https://github.com/musharna/phylokit-mcp"
 Issues = "https://github.com/musharna/phylokit-mcp/issues"
+Changelog = "https://github.com/musharna/phylokit-mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
 phylokit-mcp = "phylokit_mcp.server:main"
@@ -64,6 +65,8 @@ include = [
     "tests/**",
     "README.md",
     "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
     "LICENSE",
     "CITATION.cff",
     "NOTICE",
