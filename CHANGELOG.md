@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-02
+
 ### Changed
 
 - **The server is built by a `build_server()` factory instead of a module-level
