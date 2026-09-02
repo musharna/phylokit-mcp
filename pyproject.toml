@@ -83,4 +83,24 @@ extend-exclude = ["docs"]
 # jsonschema validates server.json against the registry's own published schema
 # (vendored at tests/server.schema.json) so registry-side constraints fail here
 # rather than in the publish workflow, which only runs once the tag is cut.
-dev = ["pytest>=8.0", "ruff>=0.6", "jsonschema>=4.0"]
+dev = ["pytest>=8.0", "ruff>=0.6", "jsonschema>=4.0", "mypy>=1.11"]
+
+[tool.mypy]
+# Matches requires-python (>=3.12) and the CI matrix. Checking at 3.11 made
+# mypy fail to PARSE piqtree, which uses PEP 695 type-parameter syntax.
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+# The MCP types are pydantic models with a camelCase alias_generator and
+# populate_by_name, so `ToolAnnotations(read_only_hint=...)` is correct at
+# runtime and the field IS snake_case. Without the plugin mypy reads only the
+# alias-based signature and demands `readOnlyHint`, which would be a wire-format
+# spelling pushed into source to satisfy a checker that was mis-modelling it.
+warn_unused_ignores = true
+
+# Scoped rather than global: these two publish no stubs and no py.typed. A
+# blanket ignore_missing_imports would also have swallowed the `mcp` resolution
+# failure that turned out to be mypy running outside the project environment --
+# a real problem hiding behind a setting meant for third-party gaps.
+[[tool.mypy.overrides]]
+module = ["cogent3.*"]
+ignore_missing_imports = true
