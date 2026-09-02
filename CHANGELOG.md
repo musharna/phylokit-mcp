@@ -17,9 +17,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   server said so. Each tool is now wrapped at registration to re-raise those as
   `ToolError`. The tool functions keep raising their own types for the unit
   tests that import them directly, and a genuine crash stays masked as the SDK
-  intends. Caught by `test_a_ragged_alignment_surfaces_as_a_tool_error_not_a_crash`,
-  which matches the refusal TEXT at the tool layer and is unchanged — it is the
-  guard.
+  intends. `test_a_ragged_alignment_surfaces_as_a_tool_error_not_a_crash`
+  matches the refusal TEXT at the tool layer, which is what makes it able to
+  fail at all: asserting only that the call errored is byte-identical whether
+  the reason survived or was masked.
+
+### Added
+
+- **A guard that the refusal boundary covers every tool, not just the one under
+  test.** The wrapper is applied by hand at each registration, and the text
+  assertion above pins a single tool — it passes unchanged on the day a sixth
+  tool is registered without the wrapper, which is the same bug returning with
+  no failing test. `tests/test_refusal_boundary.py` reads the tool registry off
+  the built server and asserts every registered callable came out of
+  `_surfaces_refusals`, identified by code object rather than by `__wrapped__`
+  or `__name__` — `functools.wraps` copies the wrapped function's name onto the
+  wrapper, so neither of those can tell the boundary from any other decorator.
+  Reading the registry rather than parsing the source keeps the guard valid for
+  either registration shape. A second test asserts both directions in one place:
+  a refusal converts, and a genuine `TypeError` still propagates unmasked, so an
+  over-broad `except` cannot pass by destroying the SDK's crash signal.
 
 ## [0.4.0] — 2026-08-02
 
