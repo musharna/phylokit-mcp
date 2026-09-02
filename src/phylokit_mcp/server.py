@@ -16,6 +16,7 @@ from . import engine  # noqa: I001
 # stdlib TypedDict is safe here: pydantic only rejects it under Python < 3.12,
 # and piqtree ships wheels for 3.12+ only, so this package cannot run on a
 # version where the typing_extensions backport would be required.
+import functools
 from typing import Any, NotRequired, TypedDict
 
 # mcp 2.x renamed FastMCP to MCPServer and moved it out of mcp.server.fastmcp,
@@ -23,6 +24,7 @@ from typing import Any, NotRequired, TypedDict
 # `annotations` and `structured_output` kwargs — so this is a rename, not a
 # rewrite. ToolAnnotations below did not move.
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from . import alignment as aln_mod
@@ -428,6 +430,31 @@ def capabilities(include_models: bool = False) -> CapabilitiesResult:
     return out
 
 
+def _surfaces_refusals(fn):
+    """Re-raise an anticipated refusal as ToolError so its text reaches the model.
+
+    Since mcp 2.1 (python-sdk #3314) MCPServer treats any exception other than
+    ToolError as a crash: the model sees only `Error executing tool <name>` and
+    the reason stays in the server log. Under mcp 2.0 the text went through
+    regardless, which is why nothing here needed to say so. Every refusal this
+    server raises on purpose is a ValueError — AlignmentError and the argument
+    checks in bootstrap and inference — and the message is the product: a ragged
+    alignment, an unknown criterion, too few replicates, each says what to do
+    instead. The conversion happens once, at registration, so the tool functions
+    keep raising their own types for the unit tests that import them directly.
+    Anything else IS a crash and stays masked as the SDK intends.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+
+    return wrapper
+
+
 def build_server() -> MCPServer:
     """Construct a fresh server.
 
@@ -447,27 +474,27 @@ def build_server() -> MCPServer:
         title="Infer a phylogenetic tree with bootstrap support",
         annotations=_READ_ONLY,
         structured_output=True,
-    )(infer_tree)
+    )(_surfaces_refusals(infer_tree))
     mcp.tool(
         title="Rank substitution models, with the margin over the runners-up",
         annotations=_READ_ONLY,
         structured_output=True,
-    )(select_substitution_model)
+    )(_surfaces_refusals(select_substitution_model))
     mcp.tool(
         title="Compare two tree topologies",
         annotations=_READ_ONLY,
         structured_output=True,
-    )(compare_trees)
+    )(_surfaces_refusals(compare_trees))
     mcp.tool(
         title="Simulate an alignment from a known tree",
         annotations=_READ_ONLY,
         structured_output=True,
-    )(simulate_alignment)
+    )(_surfaces_refusals(simulate_alignment))
     mcp.tool(
         title="Engine capabilities and limits",
         annotations=_READ_ONLY,
         structured_output=True,
-    )(capabilities)
+    )(_surfaces_refusals(capabilities))
     return mcp
 
 

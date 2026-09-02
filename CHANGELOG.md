@@ -6,6 +6,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **Refusals reach the calling agent again under mcp >= 2.1.** mcp 2.1.0
+  (python-sdk #3314) treats any exception other than `ToolError` as a crash:
+  the model sees only `Error executing tool <name>` and the reason stays in the
+  server log. Every refusal this server raises on purpose is a `ValueError` — a
+  ragged alignment, an unknown criterion, too few replicates — and its message
+  is the product; under 2.0 the text went through regardless, so nothing in the
+  server said so. Each tool is now wrapped at registration to re-raise those as
+  `ToolError`. The tool functions keep raising their own types for the unit
+  tests that import them directly, and a genuine crash stays masked as the SDK
+  intends. Caught by `test_a_ragged_alignment_surfaces_as_a_tool_error_not_a_crash`,
+  which matches the refusal TEXT at the tool layer and is unchanged — it is the
+  guard.
+
 ## [0.4.0] — 2026-08-02
 
 ### Changed
