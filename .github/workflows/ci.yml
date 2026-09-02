@@ -45,6 +45,13 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+      # Gated here because it was previously red and nobody could see it: mypy
+      # was neither declared nor configured, so `uv run mypy` picked up an
+      # ambient install that could not resolve the project's own dependencies
+      # and reported failures that were artefacts of running it wrong.
+      - name: Types
+        run: uv run mypy src
+
       - name: Test
         # No mocked engine anywhere in the suite, so this exercises real
         # IQ-TREE. Bootstrap replicates dominate the runtime.

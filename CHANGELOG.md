@@ -6,7 +6,30 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **mypy is declared, configured and gated in CI.** It was none of those things,
+  which meant `uv run mypy src` picked up an ambient install that could not
+  resolve this project's dependencies, and reported eight failures that were
+  mostly artefacts of running it wrong — `mcp` "not found" while importing fine
+  at runtime, and `ToolAnnotations(read_only_hint=...)` flagged as a bad keyword.
+  That last one is correct code: the MCP types set a camelCase `alias_generator`
+  with `populate_by_name`, so the field IS snake_case and only the wire format is
+  camelCase. Without the pydantic plugin mypy reads only the alias signature, and
+  "fixing" the source to match would have pushed a wire spelling into Python to
+  satisfy a checker that was mis-modelling it. Now: mypy in the dev group,
+  `[tool.mypy]` with the pydantic plugin, `python_version` matching
+  `requires-python` (3.12 — checking at 3.11 made mypy fail to *parse* piqtree,
+  which uses PEP 695 syntax), and `ignore_missing_imports` scoped to `cogent3.*`
+  alone rather than set globally, so it cannot swallow a real resolution failure
+  the way it would have swallowed the `mcp` one.
+
 ### Fixed
+
+- **Removed a stale `type: ignore[typeddict-item]`** that `warn_unused_ignores`
+  surfaced. The four others in the file were each checked by removal and are
+  load-bearing — dropping any one produces an error, so this was the only dead
+  suppression rather than the tidiest-looking one.
 
 - **Refusals reach the calling agent again under mcp >= 2.1.** mcp 2.1.0
   (python-sdk #3314) treats any exception other than `ToolError` as a crash:

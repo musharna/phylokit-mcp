@@ -302,7 +302,7 @@ def select_substitution_model(
     )
     return ModelResult(
         **selection,  # type: ignore[typeddict-item]
-        alignment=stats.__dict__,  # type: ignore[typeddict-item]
+        alignment=stats.__dict__,
         warnings=diagnostics.collect(
             stats=stats, selection=selection, pinned=engine.threads_pinned()
         ),
