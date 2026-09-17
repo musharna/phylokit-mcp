@@ -11,6 +11,7 @@ and support values — all wrong, none complaining.
 """
 
 import pytest
+from piqtree.exceptions import IqTreeError
 
 from phylokit_mcp.alignment import AlignmentError
 from phylokit_mcp.bootstrap import bootstrap_support
@@ -41,7 +42,11 @@ def test_a_nucleotide_model_on_protein_data_fails_rather_than_silently_fitting()
     longer distinguish "the protein moltype reached the engine" from "any model
     happens to work".
     """
-    with pytest.raises(Exception):  # noqa: B017 - engine-specific type
+    # IQ-TREE rejects a DNA model for a protein alignment as an unknown model
+    # file ("File not found GTR"); that specific refusal is what proves the
+    # moltype reached the engine. Measured 2026-09-17; a bare Exception here
+    # also passed on an import error.
+    with pytest.raises(IqTreeError, match="GTR"):
         build_ml_tree(PROTEIN, "GTR+G", seed=1, moltype="protein")
 
 

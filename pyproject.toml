@@ -104,3 +104,6 @@ warn_unused_ignores = true
 [[tool.mypy.overrides]]
 module = ["cogent3.*"]
 ignore_missing_imports = true
+
+[tool.mutmut]
+source_paths = ["src"]

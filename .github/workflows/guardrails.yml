@@ -1,0 +1,156 @@
+name: guardrails
+
+# From ~/repo-template (scripts/guardrails-sync.sh). Runs on every PR/push:
+#   lint      pre-commit (ruff, shellcheck, house rules)
+#   test      pytest, then pytest again with NO network (empty netns)
+#   security  pip-audit + bandit
+#   review    Claude code review posted on the PR (needs CLAUDE_CODE_OAUTH_TOKEN)
+# Action SHAs verified to exist on 2026-09-11.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guardrails-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      # Auto-FIXING hooks (ruff --fix, ruff-format, eof, whitespace) stay local:
+      # in CI they rewrite pre-existing files and report that as failure, so
+      # every repo that predates the template would be red forever. The CI gate
+      # is the non-modifying set: ruff check, structural checks, house rules.
+      # Use the repo's own pinned ruff when it has one (its baseline), else the
+      # template pin. A version jump is not a code defect.
+      - name: ruff check (no fix)
+        run: |
+          uv sync --all-extras --dev
+          if [ -f requirements-dev.txt ]; then uv pip install -r requirements-dev.txt; fi
+          if [ -x .venv/bin/ruff ]; then echo "repo ruff: "; .venv/bin/ruff check .
+          else echo "template ruff 0.16.7"; uvx ruff@0.16.7 check .; fi
+      - name: pre-commit non-modifying hooks + house rules (all files)
+        env:
+          SKIP: ruff-check,ruff-format,end-of-file-fixer,trailing-whitespace
+        run: uvx pre-commit run --all-files --show-diff-on-failure
+      - name: house-rule hooks can fail (negative controls)
+        run: bash scripts/guardrails-selftest.sh
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+      - name: Install
+        run: |
+          if [ -f uv.lock ]; then uv sync --locked --all-extras --dev
+          else uv sync --all-extras --dev; fi
+          # repos that pin test deps outside pyproject (taxon3d)
+          if [ -f requirements-dev.txt ]; then uv pip install -r requirements-dev.txt; fi
+      - name: Tests
+        run: uv run --with pytest pytest -q -p no:cacheprovider
+      - name: Tests with no network
+        # The same suite inside an empty network namespace (loopback only). A
+        # test that reaches a live registry from here fails instead of passing
+        # while the registry happens to agree with the fixture - which is how
+        # three tests hit live NCBI from required CI for months (data-aggregator
+        # #91): their monkeypatch never bound and nothing could tell. Live tests
+        # that mean to be live gate themselves on RECAP_NO_NET / *_LIVE.
+        # Ubuntu 24.04 runners restrict unprivileged user namespaces, hence sudo.
+        # Negative control first: the namespace must actually be offline, or
+        # this step would be a second copy of the one above.
+        env:
+          RECAP_NO_NET: "1"
+          PYTEST_OFFLINE: "1"
+        run: |
+          # KEEP lists what must survive both sudo hops: setup-uv's cache/python
+          # dirs (else uv resolves into an empty cache and reaches for the index)
+          # and the two offline flags. The inner sudo applies secure_path before
+          # any preserved PATH, so uv is resolved to an absolute path first.
+          KEEP=PATH,HOME,UV_CACHE_DIR,UV_PYTHON_INSTALL_DIR,RECAP_NO_NET,PYTEST_OFFLINE
+          UV="$(command -v uv)"
+          sudo --preserve-env="$KEEP" unshare -n sh -ec '
+            ip link set lo up
+            if curl -sS --max-time 5 https://api.github.com >/dev/null 2>&1; then
+              echo "::error::network namespace is NOT offline; the offline run would prove nothing"; exit 1
+            fi
+            exec sudo -u "$SUDO_USER" --preserve-env="$1" "$2" run --offline --with pytest pytest -q -p no:cacheprovider
+          ' sh "$KEEP" "$UV"
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: pip-audit (known-vulnerable dependencies)
+        run: |
+          uv sync --all-extras --dev
+          if [ -f requirements-dev.txt ]; then uv pip install -r requirements-dev.txt; fi
+          # Audit the resolved dependency set, not the project itself (which may
+          # not be on PyPI; --strict treats an unauditable/editable dist as failure).
+          uv export --all-extras --dev --no-emit-project --no-hashes -o /tmp/req.txt
+          uvx pip-audit -r /tmp/req.txt --strict --desc on
+      - name: bandit (insecure code patterns, medium+ severity)
+        run: uvx bandit -q -r . -ll -x ./tests,./.venv,./mutants
+
+  review:
+    # Automated Claude code review. Fails LOUD when the key is missing rather
+    # than silently skipping: a review step that quietly no-ops is worse than
+    # none, because the green check claims a review happened.
+    # Dependabot-authored PRs never receive repository secrets (GitHub design),
+    # so there the token is unreachable rather than unset: skip, don't fail.
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: CLAUDE_CODE_OAUTH_TOKEN is configured
+        env:
+          KEY: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not set (Pro/Max: run claude setup-token locally). Add it: gh secret set CLAUDE_CODE_OAUTH_TOKEN -R ${{ github.repository }}"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: anthropics/claude-code-action@4169884de317bc1b4cb1b47f4476d76fed92b384 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_sticky_comment: true
+          prompt: |
+            Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+            Report only findings you can point to a line for, most severe first.
+            Bar: this code was largely machine-written, so hold it to a HIGHER
+            bar than hand-written code. Check specifically for:
+            1. Tests that cannot fail: assertions that pass on the broken code,
+               negative checks with no positive control, fixtures that encode the
+               belief under test, wall-clock budgets used as correctness checks.
+            2. Guards whose predicate cannot observe what it must discriminate.
+            3. Silent no-ops: bare str.replace(), unasserted return values,
+               swallowed exceptions, fallbacks that hide failure.
+            4. Correctness: off-by-one, unit/scale errors, wrong-name-right-value,
+               regex backtracking, resource leaks, concurrency.
+            5. Security: injection, path traversal, secrets, unsafe deserialisation.
+            Ignore style. If nothing meets the bar, say so in one line.
+            If a sticky review comment from you already exists on this PR, review
+            only the commits since it and post a short delta, not a full re-review.
+            Post the review as a PR comment via gh.
+          claude_args: |
+            --allowed-tools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
+            --max-turns 80
