@@ -34,6 +34,9 @@ jobs:
       # template pin. A version jump is not a code defect.
       - name: ruff check (no fix)
         run: |
+          # Repo-specific system prerequisites (R for rpy2, OpenCV libs, ...) live in
+          # scripts/guardrails-setup.sh so the template stays generic.
+          if [ -x scripts/guardrails-setup.sh ]; then bash scripts/guardrails-setup.sh; fi
           uv sync --all-extras --dev
           if [ -f requirements-dev.txt ]; then uv pip install -r requirements-dev.txt; fi
           if [ -x .venv/bin/ruff ]; then echo "repo ruff: "; .venv/bin/ruff check .
@@ -54,6 +57,9 @@ jobs:
           enable-cache: true
       - name: Install
         run: |
+          # Repo-specific system prerequisites (R for rpy2, OpenCV libs, ...) live in
+          # scripts/guardrails-setup.sh so the template stays generic.
+          if [ -x scripts/guardrails-setup.sh ]; then bash scripts/guardrails-setup.sh; fi
           if [ -f uv.lock ]; then uv sync --locked --all-extras --dev
           else uv sync --all-extras --dev; fi
           # repos that pin test deps outside pyproject (taxon3d)
@@ -95,6 +101,9 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: pip-audit (known-vulnerable dependencies)
         run: |
+          # Repo-specific system prerequisites (R for rpy2, OpenCV libs, ...) live in
+          # scripts/guardrails-setup.sh so the template stays generic.
+          if [ -x scripts/guardrails-setup.sh ]; then bash scripts/guardrails-setup.sh; fi
           uv sync --all-extras --dev
           if [ -f requirements-dev.txt ]; then uv pip install -r requirements-dev.txt; fi
           # Audit the resolved dependency set, not the project itself (which may

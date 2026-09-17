@@ -44,6 +44,9 @@ jobs:
       - name: Install + mutmut
         if: steps.optout.outputs.skip != '1'
         run: |
+          # Repo-specific system prerequisites (R for rpy2, OpenCV libs, ...) live in
+          # scripts/guardrails-setup.sh so the template stays generic.
+          if [ -x scripts/guardrails-setup.sh ]; then bash scripts/guardrails-setup.sh; fi
           uv sync --all-extras --dev
           if [ -f requirements-dev.txt ]; then uv pip install -r requirements-dev.txt; fi
           uv pip install "mutmut==3.7.0" pytest
@@ -246,6 +249,9 @@ jobs:
       - name: Install + hypothesis
         if: steps.day.outputs.run == '1'
         run: |
+          # Repo-specific system prerequisites (R for rpy2, OpenCV libs, ...) live in
+          # scripts/guardrails-setup.sh so the template stays generic.
+          if [ -x scripts/guardrails-setup.sh ]; then bash scripts/guardrails-setup.sh; fi
           uv sync --all-extras --dev
           if [ -f requirements-dev.txt ]; then uv pip install -r requirements-dev.txt; fi
           uv pip install hypothesis pytest
