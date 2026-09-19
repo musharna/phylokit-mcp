@@ -2,6 +2,9 @@
 # Mutation gate. Asserts GREEN BEFORE mutating — without that, a suite that was
 # already red reads as "mutant killed" for every mutant.
 set -uo pipefail
+# A same-size source swap can leave a .pyc that still runs as the mutant (or as
+# the original) after the swap, so no bytecode is written during the gate.
+export PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.." || exit 1
 PY=.venv/bin/python
 SRC=src/phylokit_mcp
@@ -102,6 +105,84 @@ run_mutant "10 server claims bit-exact reproducibility" \
 	'"bit_exact_on_repeat_within_process": False,' \
 	'"bit_exact_on_repeat_within_process": True,' \
 	"tests/test_support.py"
+
+run_mutant "11 a single sequence is sent to MAFFT (which exits 0 on it)" \
+	"$SRC/msa.py" \
+	"if len(seqs) < MIN_SEQUENCES:" \
+	"if False:" \
+	"tests/test_align.py"
+
+run_mutant "12 alphabet check off in align_sequences" \
+	"$SRC/msa.py" \
+	"bad = present - alphabet" \
+	"bad = set()" \
+	"tests/test_align.py"
+
+run_mutant "13 gapped input silently accepted" \
+	"$SRC/msa.py" \
+	"gaps = present & _GAP_CHARS" \
+	"gaps = set()" \
+	"tests/test_align.py"
+
+run_mutant "14 MAFFT always told the input is nucleotide" \
+	"$SRC/msa.py" \
+	'_MOLTYPE_FLAG[moltype],' \
+	'"--nuc",' \
+	"tests/test_align.py"
+
+run_mutant "15 output rows not checked against the input sequences" \
+	"$SRC/msa.py" \
+	'if row.replace("-", "") != seqs[nm]:' \
+	'if False:' \
+	"tests/test_align.py"
+
+run_mutant "16 --preservecase dropped" \
+	"$SRC/msa.py" \
+	'"--preservecase",' \
+	'' \
+	"tests/test_align.py"
+
+run_mutant "17 MAFFT non-zero exit ignored" \
+	"$SRC/msa.py" \
+	"if done.returncode != 0:" \
+	"if False:" \
+	"tests/test_align.py"
+
+run_mutant "18 missing MAFFT is a crash, not a refusal" \
+	"$SRC/msa.py" \
+	"raise MafftUnavailableError(_INSTALL_HINT)" \
+	"raise RuntimeError(_INSTALL_HINT)" \
+	"tests/test_align.py"
+
+run_mutant "19 'alignment' is right-padding, MAFFT output discarded" \
+	"$SRC/msa.py" \
+	'    return aligned' \
+	'    return {n: s.ljust(max(map(len, seqs.values())), "-") for n, s in seqs.items()}' \
+	"tests/test_align.py"
+
+run_mutant "20 output name/order not checked" \
+	"$SRC/msa.py" \
+	"if list(aligned) != list(seqs):" \
+	"if False:" \
+	"tests/test_align.py"
+
+run_mutant "21 two aligned sequences reported ready for infer_tree" \
+	"$SRC/server.py" \
+	"ready = len(aligned) >= aln_mod.MIN_TAXA" \
+	"ready = True" \
+	"tests/test_align.py"
+
+run_mutant "22 no wall-clock cap on MAFFT" \
+	"$SRC/msa.py" \
+	"timeout=TIMEOUT_SECONDS," \
+	"timeout=None," \
+	"tests/test_align.py"
+
+run_mutant "23 per-sequence length cap off" \
+	"$SRC/msa.py" \
+	"if len(s) > MAX_SITES:" \
+	"if False:" \
+	"tests/test_align.py"
 
 echo
 echo "=== confirming clean restore ==="

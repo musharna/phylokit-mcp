@@ -57,6 +57,31 @@ stopped being hard and every support test below it is only measuring the easy
 regime, where support is 1.00 everywhere and nothing discriminates.
 
 
+## align_sequences — 2026-09-18, at 0.5.0
+
+Against MAFFT v7.526. Each was also run once with the failure printed, to confirm
+the test failed for the reason in the right-hand column and not some other one.
+
+| #   | mutant                                                  | killed by                                                        |
+| --- | ------------------------------------------------------- | ---------------------------------------------------------------- |
+| 11  | a single sequence is sent to MAFFT                      | `DID NOT RAISE AlignmentError` — MAFFT exits 0 on one sequence   |
+| 12  | alphabet check off                                      | `DID NOT RAISE AlignmentError`                                   |
+| 13  | gapped input accepted                                   | the degap check fires instead: MAFFT stripped the gaps silently  |
+| 14  | MAFFT always told the input is nucleotide               | `'--nuc' == '--amino'`                                           |
+| 15  | output rows not checked against the input               | `DID NOT RAISE` on a stand-in that drops a residue               |
+| 16  | `--preservecase` dropped                                | 8 of 9 tests: MAFFT lower-cases, the degap check rejects it      |
+| 17  | non-zero exit ignored                                   | error text no longer carries `exited 3` and the stderr           |
+| 18  | missing MAFFT raises `RuntimeError`                     | the refusal type, and the text no longer survives `call_tool`    |
+| 19  | output replaced by right-padded input                   | planted-indel columns wrong; end-to-end tree at RF 4             |
+| 20  | output name/order not checked                           | `DID NOT RAISE` on a stand-in that reorders                      |
+| 21  | two aligned sequences reported ready for `infer_tree`   | `ready_for_infer_tree is False`                                  |
+| 22  | no wall-clock cap                                       | the hung stand-in runs to completion; wrong error                |
+| 23  | per-sequence length cap off                             | `DID NOT RAISE AlignmentError`                                   |
+
+Mutant 19 is the one worth reading. Equal-length rows are all `infer_tree` checks
+for, and right-padding produces them. Only a control whose homology was planted
+can tell that from an alignment.
+
 ## Protein alignments
 
 | mutant                                              | result |

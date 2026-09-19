@@ -7,9 +7,14 @@ Thanks for helping improve `phylokit-mcp`. It is an MCP server exposing IQ-TREE 
 Requires Python >=3.12 and [`uv`](https://docs.astral.sh/uv/).
 
 Python 3.12+ is a hard floor: piqtree publishes wheels for 3.12 and up, and it
-is the inference engine. No system packages are needed — piqtree ships IQ-TREE 2
-as a wheel, so there is no separate binary to install and no version skew between
-a CLI and the library.
+is the inference engine. piqtree ships IQ-TREE 2 as a wheel, so there is no
+separate IQ-TREE binary and no version skew between a CLI and the library.
+
+One system package IS needed: **MAFFT**, on `PATH`, for `align_sequences`
+(`bash scripts/guardrails-setup.sh` installs it on Debian/Ubuntu, which is what CI
+runs). `tests/test_align.py` drives the real binary and fails without it; it
+does not skip, because a skipped alignment suite is green on a machine that
+cannot align.
 
 ```bash
 uv sync
