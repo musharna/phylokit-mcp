@@ -15,7 +15,8 @@ Phylogenetic inference over MCP, driving IQ-TREE 2 through
 **A topology without support is not a result.** `infer_tree` always runs a
 bootstrap and always returns per-clade support. There is no flag to skip it.
 
-5 tools, 62 tests against real IQ-TREE (no mocked engine), 10 mutation checks,
+6 tools, 105 tests against real IQ-TREE and real MAFFT (no mocked engine), 23
+mutation checks,
 and a real-process JSON-RPC handshake test.
 
 ## Why the rule
@@ -59,6 +60,7 @@ result the caller cannot evaluate.
 | `select_substitution_model` | Ranks 100+ models with ΔAIC/AICc/BIC, and says when the criteria disagree.         |
 | `compare_trees`             | Robinson–Foulds distance and the clades that differ. Compares splits, not strings. |
 | `simulate_alignment`        | Generates sequences along a tree you specify — the positive control.               |
+| `align_sequences`           | Aligns unaligned FASTA with MAFFT; the output goes straight into `infer_tree`.     |
 | `capabilities`              | Engine version, 215 substitution models, enforced limits.                          |
 
 ## Install
@@ -69,6 +71,13 @@ pip install phylokit-mcp
 
 piqtree ships prebuilt wheels, so there is no compiler, no R and no conda step —
 but it requires **Python 3.12+**, and so does this package.
+
+`align_sequences` is the one tool that needs something pip cannot install: the
+[MAFFT](https://mafft.cbrc.jp/alignment/software/) binary on `PATH`
+(`apt install mafft`, `brew install mafft`, or `conda install -c bioconda mafft`).
+The other five tools work without it, `capabilities` reports
+`aligner_version: null`, and calling `align_sequences` returns a refusal that
+names the install rather than a crash.
 
 ## Configure your MCP client
 
@@ -129,7 +138,11 @@ near-tied topologies can flip on the last bits.
   expose the resulting values.
 - **Cost is linear in replicates.** ~130 ms per replicate at 7 taxa / 300 sites,
   and it grows with taxon count. Capped at 200 taxa and 1000 replicates.
-- **It does not align sequences.** Ragged input is refused, not guessed at.
+- **Alignment is MAFFT `--auto`, single-threaded, and nothing else.** No choice
+  of strategy, no profile alignment, no trimming, at most 200 sequences of
+  100,000 residues, and a 600 s wall-clock cap. Input that already contains gaps
+  is refused rather than silently degapped. The tree tools still refuse ragged
+  input; they do not align it for you.
 - **Unrooted trees.** No rooting, no dating, no ancestral reconstruction.
 
 ## Licence
@@ -141,5 +154,7 @@ GPL-3. cogent3 is BSD and imposes nothing.
 Unofficial. Not affiliated with, endorsed by, or sponsored by the IQ-TREE authors
 or the cogent3 project. **IQ-TREE 2 is academic software and expects to be cited**
 — if results from this server appear in published work, cite IQ-TREE 2 as
-directed at [iqtree.org](http://www.iqtree.org/), not this wrapper. See
-[NOTICE](NOTICE).
+directed at [iqtree.org](http://www.iqtree.org/), not this wrapper. The same
+holds for MAFFT when `align_sequences` produced the alignment: Katoh & Standley
+2013, [doi:10.1093/molbev/mst010](https://doi.org/10.1093/molbev/mst010). MAFFT is
+BSD-licensed and is run as a separate program, not linked. See [NOTICE](NOTICE).

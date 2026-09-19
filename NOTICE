@@ -23,6 +23,10 @@ Third-party dependencies
     Source    — https://github.com/iqtree/iqtree2
     License   — GPL-2.0
 
+    MAFFT     — https://mafft.cbrc.jp/alignment/software/
+    License   — BSD-3-Clause. NOT bundled or linked: align_sequences runs the
+                user's own installed `mafft` as a separate process.
+
 --------------------------------------------------------------------------------
 Citation
 --------------------------------------------------------------------------------

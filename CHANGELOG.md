@@ -6,7 +6,57 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-18
+
 ### Added
+
+- **`align_sequences`: the step before `infer_tree`.** The server refused ragged
+  input and told the caller to align it somewhere else. It now runs MAFFT
+  (`--auto --thread 1 --preservecase --inputorder`, with `--nuc` or `--amino`
+  passed from the declared `sequence_type` so MAFFT never sniffs the molecule
+  type either) and returns FASTA that `infer_tree` and
+  `select_substitution_model` accept unchanged, with the same alignment summary
+  and advisories the other tools return.
+  - MAFFT is a system binary, not a wheel, so it is found on `PATH` at call
+    time. Without it the five tree tools work as before, `capabilities` reports
+    `aligner_version: null`, and `align_sequences` returns a refusal naming the
+    install command. CI installs it through `scripts/guardrails-setup.sh`, the
+    hook the template's guardrails workflows already look for, so `ci.yml` and
+    `guardrails.yml` share one install step.
+  - Sequences reach MAFFT through a file in a private temporary directory and
+    the command is an argument list; nothing caller-supplied is on a command
+    line. 2-200 sequences of at most 100,000 residues (the existing caps), a
+    600 s wall-clock cap reported as a refusal, names held to the Newick-safe
+    set the tree tools require.
+  - Two things MAFFT does silently are checked rather than trusted. It exits 0
+    on a single sequence and returns it unchanged, so the count check is made
+    here. And it strips gap characters and lower-cases nucleotides in its input
+    without saying so, so gapped input is refused up front and every output
+    row, degapped, must equal its input sequence — with names and order
+    unchanged — or the call fails.
+  - The known-answer control plants a 12-base deletion and a 9-base insertion
+    in a 120-base ancestor, chosen so neither indel can slide a column at equal
+    score, and asserts the gaps come back in exactly those rows and columns. End
+    to end, sequences cut from a simulated alignment are refused by `infer_tree`,
+    aligned, accepted, and recover the true topology. Replacing MAFFT's output
+    with right-padding — the cheapest thing that produces equal-length rows —
+    fails both: the columns are wrong and the tree comes back at RF 4.
+    Thirteen mutants added to `docs/mutate.sh` (11-23), all killed.
+  - A two-sequence alignment is returned, flagged `ready_for_infer_tree: false`
+    with a `too_few_taxa_for_a_tree` advisory, since the tree tools need four.
+  - A MAFFT crash (non-zero exit, output that is not FASTA, altered residues) is
+    a `RuntimeError` carrying MAFFT's stderr. Under the refusal boundary that is
+    a crash, so it is masked to the model and lands in the server log, as the
+    SDK intends for anything that is not an anticipated refusal.
+  - Cite MAFFT when this tool produced the alignment: Katoh & Standley 2013,
+    doi:10.1093/molbev/mst010 (added to `CITATION.cff` references).
+
+### Changed
+
+- The ragged-alignment refusal now points at `align_sequences` instead of
+  saying the server does not align.
+- `docs/mutate.sh` sets `PYTHONDONTWRITEBYTECODE=1`: a same-size source swap can
+  leave bytecode that still runs as the mutant after the restore.
 
 - **mypy is declared, configured and gated in CI.** It was none of those things,
   which meant `uv run mypy src` picked up an ambient install that could not

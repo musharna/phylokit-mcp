@@ -1,4 +1,4 @@
-"""MCP server. Five tools over IQ-TREE.
+"""MCP server. Five tools over IQ-TREE, and one over MAFFT.
 
 `engine` is imported FIRST and deliberately: it pins OMP_NUM_THREADS before
 piqtree loads, and IQ-TREE reads that variable when its thread pool initialises.
@@ -28,7 +28,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from . import alignment as aln_mod
-from . import diagnostics
+from . import diagnostics, msa
 from .alignment import (
     MOLTYPES,
     AlignmentError,
@@ -81,9 +81,11 @@ winner. Models within {DELTA_INDISTINGUISHABLE} of the best are conventionally
 indistinguishable; when the tool says so, do not report the winner as "the
 best-fitting model" without that caveat.
 
-Alignment LENGTH is not evidence — `n_parsimony_informative` is. This server
-infers trees; it does not align sequences, and it will refuse ragged input
-rather than guess.
+Alignment LENGTH is not evidence — `n_parsimony_informative` is. The tree tools
+refuse ragged input rather than guess. `align_sequences` is the step before
+them: it runs MAFFT on unaligned sequences and returns FASTA that `infer_tree`
+accepts as is. An alignment is an inference too — read its `fraction_gaps` and
+`n_parsimony_informative` before building on it.
 """
 
 # snake_case spellings. The camelCase aliases are still accepted as constructor
@@ -166,6 +168,18 @@ class SimulationResult(TypedDict):
     warnings: list[dict[str, Any]]
 
 
+class AlignResult(TypedDict):
+    fasta: str
+    alignment: AlignmentDict
+    sequence_type: str
+    # Longest and shortest INPUT sequence. Against `alignment.n_sites` this is
+    # how much of the alignment is gap the aligner introduced.
+    input_lengths: dict[str, int]
+    engine: dict[str, Any]
+    ready_for_infer_tree: bool
+    warnings: list[dict[str, Any]]
+
+
 class CompareResult(TypedDict):
     robinson_foulds: int
     normalised_robinson_foulds: float | None
@@ -183,6 +197,9 @@ class CapabilitiesResult(TypedDict):
     substitution_models: NotRequired[list[str]]
     n_substitution_models: int
     criteria: list[str]
+    # MAFFT's version string, or None when it is not installed. None is an
+    # answer, not a failure: only `align_sequences` needs it.
+    aligner_version: str | None
     limits: dict[str, int]
     support_thresholds: dict[str, float]
     threads_pinned: bool
@@ -231,7 +248,7 @@ def infer_tree(
 
     Args:
         fasta: Aligned nucleotide sequences in FASTA. All sequences must be the
-            same length — this server does not align.
+            same length — run `align_sequences` first if they are not.
         model: Substitution model, e.g. "JC", "HKY", "GTR+G". Run `select_model`
             first if you do not have a reason to prefer one.
         replicates: Bootstrap replicates (20-1000). Cost is roughly linear in
@@ -398,6 +415,56 @@ def simulate_alignment(
     )
 
 
+def align_sequences(fasta: str, sequence_type: str = "dna") -> AlignResult:
+    """Align unaligned sequences with MAFFT, ready for `infer_tree`.
+
+    The returned `fasta` has every row the same length and can be passed to
+    `infer_tree` or `select_substitution_model` unchanged. Each output row, with
+    its gaps removed, is verified to equal the input sequence before it is
+    returned.
+
+    Args:
+        fasta: UNALIGNED sequences in FASTA, 2-200 of them. Gap characters are
+            refused: input that is already aligned does not need this tool.
+        sequence_type: "dna" (default) or "protein". Declared, never sniffed,
+            and passed to MAFFT explicitly so it does not guess either.
+    """
+    if sequence_type not in MOLTYPES:
+        raise AlignmentError(
+            f"Unknown sequence_type {sequence_type!r}. Valid: {list(MOLTYPES)}."
+        )
+    seqs = parse_fasta(fasta)
+    aligned = msa.align(seqs, sequence_type)
+    stats = summarise(aligned, sequence_type)
+    warnings = diagnostics.collect(stats=stats, pinned=engine.threads_pinned())
+    ready = len(aligned) >= aln_mod.MIN_TAXA
+    if not ready:
+        warnings.append(
+            {
+                "code": "too_few_taxa_for_a_tree",
+                "message": (
+                    f"{len(aligned)} sequences were aligned, but infer_tree needs "
+                    f"at least {aln_mod.MIN_TAXA}: an unrooted tree on fewer has "
+                    "only one topology."
+                ),
+            }
+        )
+    lengths = [len(s) for s in seqs.values()]
+    return AlignResult(
+        fasta="".join(f">{nm}\n{s}\n" for nm, s in aligned.items()),
+        alignment=stats.__dict__,  # type: ignore[typeddict-item]
+        sequence_type=sequence_type,
+        input_lengths={"min": min(lengths), "max": max(lengths)},
+        engine={
+            "name": "MAFFT",
+            "version": msa.mafft_version(),
+            "options": msa.mafft_args(sequence_type),
+        },
+        ready_for_infer_tree=ready,
+        warnings=warnings,
+    )
+
+
 def capabilities(include_models: bool = False) -> CapabilitiesResult:
     """What this server can do, and the bounds it enforces.
 
@@ -415,7 +482,9 @@ def capabilities(include_models: bool = False) -> CapabilitiesResult:
         engine_version=engine.engine_version(),
         n_substitution_models=len(models),
         criteria=list(CRITERIA),
+        aligner_version=msa.mafft_version(),
         limits={
+            "min_sequences_to_align": msa.MIN_SEQUENCES,
             "min_taxa": aln_mod.MIN_TAXA,
             "max_taxa": aln_mod.MAX_TAXA,
             "max_sites": aln_mod.MAX_SITES,
@@ -490,6 +559,11 @@ def build_server() -> MCPServer:
         annotations=_READ_ONLY,
         structured_output=True,
     )(_surfaces_refusals(simulate_alignment))
+    mcp.tool(
+        title="Align sequences with MAFFT, ready for infer_tree",
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )(_surfaces_refusals(align_sequences))
     mcp.tool(
         title="Engine capabilities and limits",
         annotations=_READ_ONLY,

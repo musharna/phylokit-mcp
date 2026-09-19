@@ -105,8 +105,8 @@ def validate(seqs: dict[str, str], moltype: str = "dna") -> None:
         )
         raise AlignmentError(
             "Sequences are not all the same length, so this is not an alignment. "
-            f"Lengths present — {detail}. Align the sequences first; this server "
-            "infers trees, it does not align."
+            f"Lengths present — {detail}. If they are unaligned, run align_sequences "
+            "first; the tree tools will not guess an alignment."
         )
 
     (n_sites,) = lengths

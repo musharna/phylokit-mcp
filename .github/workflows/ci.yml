@@ -37,6 +37,11 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
+      # MAFFT has no wheel, and tests/test_align.py drives the real binary. The
+      # same script serves the guardrails workflows, so the two cannot drift.
+      - name: System prerequisites (MAFFT)
+        run: bash scripts/guardrails-setup.sh
+
       - name: Install
         run: uv sync --python ${{ matrix.python-version }} --all-extras --dev
 
@@ -54,5 +59,5 @@ jobs:
 
       - name: Test
         # No mocked engine anywhere in the suite, so this exercises real
-        # IQ-TREE. Bootstrap replicates dominate the runtime.
+        # IQ-TREE and real MAFFT. Bootstrap replicates dominate the runtime.
         run: uv run pytest -q --durations=10
