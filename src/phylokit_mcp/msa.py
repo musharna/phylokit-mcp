@@ -35,6 +35,8 @@ MIN_SEQUENCES = 2
 # The server is synchronous, so an alignment that does not finish is a hung
 # server. The cap is reported as a refusal rather than left to the client.
 TIMEOUT_SECONDS = 600
+# `mafft --version` is instant on a working install; this bounds a broken one.
+VERSION_TIMEOUT_SECONDS: float = 30
 # Gap and missing-data symbols. MAFFT strips '-' from its input silently, which
 # would make "the output, degapped, equals the input" false for a reason the
 # caller never sees, so they are refused up front instead.
@@ -69,14 +71,19 @@ def mafft_version() -> str | None:
         return None
     # `mafft --version` writes to STDERR, and exits 0 on some builds and 1 on
     # others, so neither the stream nor the status is assumed.
-    done = subprocess.run(
-        [exe, "--version"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-        stdin=subprocess.DEVNULL,
-    )
+    try:
+        done = subprocess.run(
+            [exe, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=VERSION_TIMEOUT_SECONDS,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise MafftFailedError(
+            f"`{exe} --version` did not answer within {VERSION_TIMEOUT_SECONDS} s."
+        ) from exc
     text = (done.stderr + done.stdout).strip()
     if not text:
         raise MafftFailedError(

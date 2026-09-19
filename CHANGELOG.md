@@ -20,7 +20,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - MAFFT is a system binary, not a wheel, so it is found on `PATH` at call
     time. Without it the five tree tools work as before, `capabilities` reports
     `aligner_version: null`, and `align_sequences` returns a refusal naming the
-    install command. CI installs it through `scripts/guardrails-setup.sh`, the
+    install command. An installed MAFFT that prints nothing or hangs on
+    `--version` is reported in `aligner_error` instead of failing `capabilities`. CI installs it through `scripts/guardrails-setup.sh`, the
     hook the template's guardrails workflows already look for, so `ci.yml` and
     `guardrails.yml` share one install step.
   - Sequences reach MAFFT through a file in a private temporary directory and

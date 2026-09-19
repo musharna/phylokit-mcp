@@ -77,7 +77,9 @@ but it requires **Python 3.12+**, and so does this package.
 (`apt install mafft`, `brew install mafft`, or `conda install -c bioconda mafft`).
 The other five tools work without it, `capabilities` reports
 `aligner_version: null`, and calling `align_sequences` returns a refusal that
-names the install rather than a crash.
+names the install rather than a crash. A MAFFT that is installed but does not
+answer `--version` is a different state: `aligner_version` is still `null` and
+`aligner_error` says what happened.
 
 ## Configure your MCP client
 

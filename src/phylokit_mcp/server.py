@@ -200,6 +200,9 @@ class CapabilitiesResult(TypedDict):
     # MAFFT's version string, or None when it is not installed. None is an
     # answer, not a failure: only `align_sequences` needs it.
     aligner_version: str | None
+    # Set only when MAFFT is installed and broken, so that state does not read
+    # as "not installed". The tree tools are unaffected either way.
+    aligner_error: str | None
     limits: dict[str, int]
     support_thresholds: dict[str, float]
     threads_pinned: bool
@@ -477,12 +480,18 @@ def capabilities(include_models: bool = False) -> CapabilitiesResult:
     models = sorted(
         str(v) for v in engine.piqtree().available_models().columns["Abbreviation"]
     )
+    aligner_version, aligner_error = None, None
+    try:
+        aligner_version = msa.mafft_version()
+    except msa.MafftFailedError as exc:
+        aligner_error = str(exc)
     out = CapabilitiesResult(
         engine="IQ-TREE 2 via piqtree",
         engine_version=engine.engine_version(),
         n_substitution_models=len(models),
         criteria=list(CRITERIA),
-        aligner_version=msa.mafft_version(),
+        aligner_version=aligner_version,
+        aligner_error=aligner_error,
         limits={
             "min_sequences_to_align": msa.MIN_SEQUENCES,
             "min_taxa": aln_mod.MIN_TAXA,

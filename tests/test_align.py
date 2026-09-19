@@ -281,3 +281,37 @@ def test_sequences_never_reach_a_command_line():
     # lower-cases nucleotides and the degapped-output check would reject it.
     out = align_sequences(">a\nACGTACGTACGGTT\n>b\nacgtacgtttgg\n")
     assert parse_fasta(out["fasta"])["b"].replace("-", "") == "acgtacgtttgg"
+
+
+def test_a_broken_aligner_is_reported_by_capabilities_not_a_crash(
+    monkeypatch, tmp_path
+):
+    """Installed-but-broken is a third state: not absent, not working.
+
+    `capabilities` is what a caller runs to find out why something fails, so it
+    has to survive the fault and name it. `aligner_version: null` alone would
+    read as "not installed".
+    """
+    real_path = os.environ["PATH"]
+    silent = tmp_path / "silent"
+    silent.mkdir()
+    monkeypatch.setenv("PATH", _stand_in(silent, "exit 0\n"))
+    caps = capabilities()
+    assert caps["aligner_version"] is None
+    assert "printed nothing" in caps["aligner_error"]
+    assert caps["engine_version"]  # the tree tools' answer is still there
+
+    hang = tmp_path / "hang"
+    hang.mkdir()
+    monkeypatch.setenv("PATH", _stand_in(hang, "exec /bin/sleep 5\n"))
+    monkeypatch.setattr(msa, "VERSION_TIMEOUT_SECONDS", 0.5)
+    caps = capabilities()
+    assert caps["aligner_version"] is None
+    assert "did not answer within 0.5 s" in caps["aligner_error"]
+
+    # Absent is not an error, and neither is working.
+    monkeypatch.setenv("PATH", str(tmp_path / "nowhere"))
+    assert capabilities()["aligner_error"] is None
+    monkeypatch.setenv("PATH", real_path)
+    caps = capabilities()
+    assert caps["aligner_version"].startswith("v") and caps["aligner_error"] is None
