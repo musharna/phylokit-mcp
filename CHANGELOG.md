@@ -6,6 +6,54 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+From the 2026-09-22 MCP-server bug audit.
+
+- **`reproducibility.deterministic_across_processes` is now `false`, because it
+  is.** Fresh processes given the same request and seed return branch lengths
+  and a log-likelihood that differ in the trailing digits; the old claim rested
+  on a test that compared support values only. The cause is IQ-TREE reading the
+  wall clock during its search — freezing `gettimeofday()` alone makes every
+  run bit-identical — and piqtree exposes no way to take the clock out (threads
+  were already 1 and the seed does reach the engine). The same mechanism
+  explains the within-process drift, so the note no longer blames `rand_seed`.
+  New field `max_support_drift_across_processes`; the cross-process test spawns
+  fresh processes and compares newick and log-likelihood, with a frozen-clock
+  positive control.
+- **Input errors raised by cogent3 or piqtree now reach the caller as refusals
+  with their reason**, instead of a bare `Error executing tool <name>`. The
+  refusal wrapper still converts only `ValueError` — a `TypeError` or
+  `RuntimeError` is also what a real bug raises — so the errors are classified
+  where the input is parsed: `to_cogent3` turns cogent3's `AlphabetError` into
+  `AlignmentError`, a new `parse_newick` turns `TreeParseError` into
+  `TreeInputError`, and seed and model checks run before the engine.
+- **`validate()` accepts exactly the characters cogent3 accepts**, asked of
+  cogent3 rather than restated. The hand-written sets let `.` (DNA) and `*`,
+  `.`, `J`, `O` (protein) through to a crash inside the engine.
+  `align_sequences` uses the same alphabet, so a stop codon is refused up front
+  (with a hint) instead of aligned into output `infer_tree` could not read.
+- **`ready_for_infer_tree` is `infer_tree`'s own input checks run on the
+  aligned output**, not a taxon count. It said `true` for output that
+  `infer_tree` refuses; a new `infer_tree_would_refuse` warning carries the
+  reason.
+- **A Newick string that names a tip twice is refused.** cogent3 silently
+  renamed the repeat (`a` → `a.2`) and `compare_trees` computed a distance over
+  a taxon that does not exist. Unnamed tips are refused too.
+- **`simulate_alignment` summarises protein as protein.** The molecule type now
+  comes from the model (piqtree's own classification); an `LG` simulation was
+  summarised in the DNA alphabet (3 informative sites instead of 48).
+- **`simulate_alignment` enforces the 4-200 taxon range `infer_tree` accepts,
+  and refuses a tree with a missing branch length**, which silently produced
+  identical sequences.
+- **`seed` must be 0 to 2**31-1, checked before any engine work** in
+  `infer_tree`, `select_substitution_model` and `simulate_alignment`. A larger
+  seed was a masked pybind `TypeError`; a negative one was refused by numpy only
+  after the full ML search. `replicates`, the model's molecule type (`LG` on
+  DNA was IQ-TREE's "File not found LG") and `criterion` are also checked
+  before the engine runs.
+- **`serverInfo.version` carries the package version.** It was `""`.
+
 ## [0.5.0] — 2026-09-18
 
 ### Added
