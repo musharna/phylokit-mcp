@@ -93,6 +93,24 @@ REPRODUCIBILITY_NOTE = (
     "with a tolerance, never by string equality."
 )
 
+SEED_MIN = 0
+# IQ-TREE takes the seed as a C int; numpy's generator needs it non-negative.
+SEED_MAX = 2**31 - 1
+
+
+def validate_seed(seed: int) -> None:
+    """Refuse a seed the engine cannot take, BEFORE any work is done.
+
+    Outside this range the failure was a pybind TypeError (masked as a crash)
+    or, for a negative seed, numpy's ValueError -- raised by the bootstrap only
+    after the full maximum-likelihood search had already run.
+    """
+    if isinstance(seed, bool) or not SEED_MIN <= seed <= SEED_MAX:
+        raise ValueError(
+            f"seed must be an integer between {SEED_MIN} and {SEED_MAX} "
+            f"(IQ-TREE takes a 32-bit signed seed), got {seed!r}."
+        )
+
 
 def reproducibility() -> dict:
     return {

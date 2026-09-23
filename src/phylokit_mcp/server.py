@@ -44,14 +44,18 @@ from .bootstrap import (
     STRONG_SUPPORT,
     WEAK_SUPPORT,
     bootstrap_support,
+    validate_replicates,
 )
 from .inference import (
     CRITERIA,
     DELTA_INDISTINGUISHABLE,
     build_ml_tree,
+    model_moltype,
+    require_model_for,
     select_model,
     tree_log_likelihood,
 )
+from .newick import parse_newick
 from .splits import (
     canonical_splits,
     format_split,
@@ -256,7 +260,8 @@ def infer_tree(
             first if you do not have a reason to prefer one.
         replicates: Bootstrap replicates (20-1000). Cost is roughly linear in
             this, so 100 is a reasonable default and 1000 is for a final answer.
-        seed: Fixes both the resampling and the engine's search.
+        seed: 0 to 2**31-1. Fixes the column resampling exactly; the engine's
+            search is seeded too but is not bit-exact (see `reproducibility`).
         sequence_type: "dna" (default) or "protein". DECLARED, never sniffed: an
             alignment of only A/C/G/T is a valid protein alignment too, so
             guessing would silently fit a nucleotide model to protein data. A
@@ -265,6 +270,13 @@ def infer_tree(
             the same sequence_type first.
     """
     seqs = _load(fasta, sequence_type)
+    # Every argument check runs BEFORE the maximum-likelihood search. The
+    # bootstrap used to be the first thing to look at `replicates` and `seed`,
+    # so a bad value was refused only after the most expensive single step had
+    # already run.
+    engine.validate_seed(seed)
+    validate_replicates(replicates)
+    require_model_for(model, sequence_type)
     # Only tree inference needs this. `_load` is shared with tools that can
     # legitimately work on a signal-free alignment, so the check lives here
     # rather than inside validate().
@@ -316,6 +328,9 @@ def select_substitution_model(
             type's model set — nucleotide and protein models are not comparable.
     """
     seqs = _load(fasta, sequence_type)
+    engine.validate_seed(seed)
+    if criterion not in CRITERIA:
+        raise ValueError(f"criterion must be one of {CRITERIA}, got {criterion!r}")
     stats = summarise(seqs, sequence_type)
     selection = select_model(
         seqs, criterion=criterion, seed=seed, top_n=top_n, moltype=sequence_type
@@ -339,9 +354,8 @@ def compare_trees(newick_a: str, newick_b: str) -> CompareResult:
         newick_a: First tree in Newick format.
         newick_b: Second tree in Newick format.
     """
-    from cogent3 import make_tree
-
-    tree_a, tree_b = make_tree(newick_a.strip()), make_tree(newick_b.strip())
+    tree_a = parse_newick(newick_a, "newick_a")
+    tree_b = parse_newick(newick_b, "newick_b")
     tips_a, tips_b = set(tree_a.get_tip_names()), set(tree_b.get_tip_names())
     shared = tips_a & tips_b
     warnings: list[dict[str, Any]] = []
@@ -393,21 +407,43 @@ def simulate_alignment(
     the biology.
 
     Args:
-        newick: The true tree, with branch lengths.
-        model: Substitution model to simulate under.
+        newick: The true tree, with a branch length on every edge.
+        model: Substitution model to simulate under. A protein model ("LG",
+            "WAG", ...) simulates protein; pass the output to `infer_tree` with
+            sequence_type="protein". `alignment.moltype` says which it is.
         length: Number of sites.
         seed: Fixes the simulation.
     """
-    from cogent3 import make_tree
-
     if not 1 <= length <= aln_mod.MAX_SITES:
         raise ValueError(f"length must be between 1 and {aln_mod.MAX_SITES}.")
-    tree = make_tree(newick.strip())
+    engine.validate_seed(seed)
+    # The molecule type comes from the model, as piqtree classifies it. It was
+    # hard-wired to DNA, so an LG simulation came back summarised in the DNA
+    # alphabet: 3 parsimony-informative sites where the protein count was 48.
+    moltype = model_moltype(model)
+    tree = parse_newick(newick)
+    tips = tree.get_tip_names()
+    if not aln_mod.MIN_TAXA <= len(tips) <= aln_mod.MAX_TAXA:
+        raise ValueError(
+            f"The tree has {len(tips)} tips; simulate_alignment takes "
+            f"{aln_mod.MIN_TAXA}-{aln_mod.MAX_TAXA}, the same range infer_tree "
+            "accepts, so that its output can be fed straight back in."
+        )
+    missing = [
+        e.name for e in tree.get_edge_vector(include_root=False) if e.length is None
+    ]
+    if missing:
+        raise ValueError(
+            f"{len(missing)} edge(s) have no branch length (e.g. "
+            f"{sorted(missing)[:4]}). Branch lengths are the amount of change to "
+            "simulate; without them every sequence comes back identical to the "
+            "root, which is an alignment with no signal, not a simulation."
+        )
     aln = engine.piqtree().simulate_alignment(
         tree=tree, model=model, length=length, rand_seed=seed
     )
     seqs = {nm: str(aln.get_seq(nm)) for nm in aln.names}
-    stats = summarise(seqs)
+    stats = summarise(seqs, moltype)
     return SimulationResult(
         fasta="".join(f">{nm}\n{s}\n" for nm, s in seqs.items()),
         true_newick=tree.get_newick(with_distances=True),
@@ -440,8 +476,18 @@ def align_sequences(fasta: str, sequence_type: str = "dna") -> AlignResult:
     aligned = msa.align(seqs, sequence_type)
     stats = summarise(aligned, sequence_type)
     warnings = diagnostics.collect(stats=stats, pinned=engine.threads_pinned())
+    # `ready_for_infer_tree` is infer_tree's own input checks run on the output,
+    # not a second opinion about them. It used to be a taxon count alone, and
+    # said True for output infer_tree then could not parse.
     ready = len(aligned) >= aln_mod.MIN_TAXA
-    if not ready:
+    if ready:
+        try:
+            validate(aligned, sequence_type)
+            require_phylogenetic_signal(aligned, sequence_type)
+        except AlignmentError as exc:
+            ready = False
+            warnings.append({"code": "infer_tree_would_refuse", "message": str(exc)})
+    else:
         warnings.append(
             {
                 "code": "too_few_taxa_for_a_tree",
@@ -521,6 +567,16 @@ def _surfaces_refusals(fn):
     instead. The conversion happens once, at registration, so the tool functions
     keep raising their own types for the unit tests that import them directly.
     Anything else IS a crash and stays masked as the SDK intends.
+
+    The libraries underneath do not share that convention: cogent3 reports bad
+    input as AlphabetError or TreeParseError, piqtree an out-of-range seed as a
+    pybind TypeError and a model for the wrong molecule as a RuntimeError. None
+    is a ValueError, so each reached the caller as a bare crash. The fix is not
+    to widen this net -- a TypeError or RuntimeError is also what a real bug
+    raises -- but to classify at the input boundary, where it is known that the
+    caller's argument is at fault: `alignment.to_cogent3` and `newick.parse_newick`
+    translate the parse errors into ValueError subclasses, and the seed and
+    model/molecule checks run before the engine is called at all.
     """
 
     @functools.wraps(fn)
