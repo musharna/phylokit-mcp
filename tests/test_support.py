@@ -113,9 +113,9 @@ def test_repeated_calls_agree_to_within_the_measured_engine_drift(fasta_hard):
     """Same seed, same input, repeated IN ONE PROCESS.
 
     This asserts a tolerance rather than equality because bit-exact equality is
-    a property IQ-TREE does not have: `rand_seed` does not fully reset its
-    internal state, so building the same tree three times in a row gives
-    call 1 == call 2 but call 3 different. Measured over six repeated
+    a property IQ-TREE does not have: it reads the wall clock during its search
+    (see the frozen-clock control below), so building the same tree three times
+    in a row can give call 1 == call 2 but call 3 different. Measured over six repeated
     50-replicate calls, three of four clades were bit-identical and one moved
     0.02 — one replicate flipping, well inside the bootstrap's own sampling
     error. The engine module documents the same number, and the server reports
@@ -130,47 +130,132 @@ def test_repeated_calls_agree_to_within_the_measured_engine_drift(fasta_hard):
         assert abs(x["support"] - y["support"]) <= IN_PROCESS_DRIFT
 
 
-def test_fresh_processes_reproduce_exactly(fasta_hard, tmp_path):
-    """The determinism claim the server DOES make, checked across processes.
+# One fresh interpreter, one MCP session, one infer_tree call. Reports what a
+# caller would compare: branch lengths (in the newick), the log-likelihood, the
+# support values, and what the server claims about reproducibility.
+_FRESH_RUN = """
+import json, sys
+import anyio
+from mcp.client.client import Client
+from phylokit_mcp.server import build_server
 
-    In-process tolerance above would pass even if the engine were badly
-    nondeterministic, so the strict claim needs its own test — and it can only
-    be made in a fresh interpreter, since that is the scope of the claim.
-    """
-    script = tmp_path / "run.py"
-    script.write_text(
-        "import json\n"
-        "from phylokit_mcp.server import infer_tree\n"
-        "import sys\n"
-        "r = infer_tree(fasta=sys.stdin.read(), model='JC', replicates=30, seed=7)\n"
-        "print(json.dumps([[c['clade'], c['support']] for c in r['support']['clades']]))\n"
-    )
-    outs = [
-        subprocess.run(
-            [sys.executable, str(script)],
-            input=fasta_hard,
+async def go():
+    async with Client(build_server()) as c:
+        r = await c.call_tool("infer_tree", {
+            "fasta": sys.stdin.read(), "model": "JC", "replicates": 20, "seed": 7,
+        })
+        assert not r.is_error, r.content[0].text
+        return r.structured_content
+
+out = anyio.run(go)
+print(json.dumps({
+    "newick": out["newick"],
+    "lnL": out["log_likelihood"],
+    "support": [[c["clade"], c["support"]] for c in out["support"]["clades"]],
+    "claim": out["reproducibility"],
+}))
+"""
+
+# gettimeofday() pinned to a constant. Freezing it -- and only it; time(),
+# clock() and getrusage() were each tried alone and changed nothing -- made
+# IQ-TREE bit-exact across and within processes, which is how the source of the
+# drift was identified.
+_FROZEN_CLOCK_C = """
+#include <sys/time.h>
+int gettimeofday(struct timeval *tv, void *tz) {
+    (void)tz; tv->tv_sec = 1000000000; tv->tv_usec = 0; return 0;
+}
+"""
+
+
+def _fresh_runs(n: int, fasta: str, env: dict | None = None) -> list[dict]:
+    """`n` fresh server processes, at most 3 at a time."""
+    import json
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(_):
+        proc = subprocess.run(
+            [sys.executable, "-c", _FRESH_RUN],
+            input=fasta,
             capture_output=True,
             text=True,
-            check=True,
             timeout=600,
-        ).stdout.strip()
-        for _ in range(2)
-    ]
-    assert outs[0] == outs[1] != ""
+            env={**os.environ, **(env or {})},
+            check=False,  # the returncode is asserted below, with stderr
+        )
+        assert proc.returncode == 0, proc.stderr[-2000:]
+        return json.loads(proc.stdout.strip().splitlines()[-1])
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        return list(pool.map(one, range(n)))
 
 
-def test_the_server_does_not_claim_bit_exact_reproducibility(fasta_easy):
-    """The reported claim must match the measured one.
+def _numbers(run: dict) -> tuple:
+    return (run["newick"], run["lnL"], tuple(map(tuple, run["support"])))
 
-    An earlier version returned `reproducible: true`, which a caller would read
-    as 'run it again and get this back'. That is false within a long-lived
-    process, and this server is long-lived by design.
+
+def test_with_the_clock_frozen_fresh_processes_are_bit_identical(fasta_hard, tmp_path):
+    """The positive control for the test below, and the proof of the cause.
+
+    If the comparison could not see equality, "the runs differ" would be a
+    property of the harness. Here the same harness, with only the wall clock
+    taken away from IQ-TREE, gets byte-identical branch lengths, likelihood and
+    support from every fresh process.
     """
-    result = infer_tree(fasta=fasta_easy, model="JC", replicates=20, seed=1)
-    repro = result["reproducibility"]
-    assert repro["deterministic_across_processes"] is True
-    assert repro["bit_exact_on_repeat_within_process"] is False
-    assert repro["max_support_drift_within_process"] == IN_PROCESS_DRIFT
+    import shutil
+
+    cc = shutil.which("cc") or shutil.which("gcc")
+    if cc is None:
+        pytest.skip("no C compiler to build the frozen-clock shim")
+    src = tmp_path / "frozen_clock.c"
+    lib = tmp_path / "frozen_clock.so"
+    src.write_text(_FROZEN_CLOCK_C)
+    subprocess.run([cc, "-shared", "-fPIC", "-o", str(lib), str(src)], check=True)
+
+    runs = _fresh_runs(4, fasta_hard, env={"LD_PRELOAD": str(lib)})
+    assert len({_numbers(r) for r in runs}) == 1, [r["lnL"] for r in runs]
+
+
+def test_fresh_processes_are_not_bit_exact_and_the_server_says_so(fasta_hard):
+    """M1 of the 2026-09-22 audit. The claim must match the measurement.
+
+    The server reported `deterministic_across_processes: True`, backed by a test
+    that compared SUPPORT VALUES only -- the one output coarse enough to hide
+    the drift. Branch lengths and the log-likelihood differ between fresh
+    processes given the same seed (IQ-TREE reads the wall clock during its
+    search; see the frozen-clock control above). This compares those, not just
+    support.
+
+    Measured on this fixture: 8 fresh processes gave 3 distinct results, so 6
+    runs all agreeing by chance is about 2%; a second batch of 6 takes it to
+    about 1 in 2000. If 12 runs ever agree, the engine has plausibly become
+    deterministic -- re-measure and revisit the claim, do not loosen this.
+    """
+    runs = _fresh_runs(6, fasta_hard)
+    if len({_numbers(r) for r in runs}) == 1:
+        runs += _fresh_runs(6, fasta_hard)
+    distinct = {_numbers(r) for r in runs}
+    assert len(distinct) > 1, (
+        "12 fresh processes returned bit-identical trees. The engine may now be "
+        "deterministic across processes; re-measure before changing the claim."
+    )
+
+    for r in runs:
+        claim = r["claim"]
+        assert claim["deterministic_across_processes"] is False, (
+            "the runs above differ, so the server must not claim cross-process "
+            f"determinism; it said {claim}"
+        )
+        assert claim["bit_exact_on_repeat_within_process"] is False
+
+    # What IS stable, stated as the tolerance the server reports: the topology
+    # and the clade list, with support within the advertised drift.
+    first = runs[0]
+    for r in runs[1:]:
+        assert [c for c, _ in r["support"]] == [c for c, _ in first["support"]]
+        for (_, x), (_, y) in zip(r["support"], first["support"], strict=True):
+            assert abs(x - y) <= first["claim"]["max_support_drift_across_processes"]
 
 
 def test_a_different_seed_changes_support_but_not_wildly(fasta_hard):
