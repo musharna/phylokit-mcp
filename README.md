@@ -109,22 +109,26 @@ picks up automatically when the repo is your working directory.
 
 Measured, not assumed:
 
-- **Across fresh processes: exact.** Three runs of an identical 30-replicate
-  bootstrap returned byte-identical support.
-- **Within one long-lived process: not bit-exact.** Passing the same `rand_seed`
-  does not fully reset IQ-TREE's internal state — building the same tree three
-  times gave call 1 == call 2 but call 3 different.
+- **Not bit-exact, in any setting.** The same request with the same seed — on
+  repeat in one process, or in a fresh process — can return branch lengths and a
+  log-likelihood that differ in the trailing digits (eight fresh processes gave
+  five distinct log-likelihoods, spread ~2e-6). IQ-TREE reads the wall clock
+  during its search: freezing `gettimeofday()` alone made every run
+  bit-identical. piqtree exposes no option to take the clock out, so the server
+  reports `deterministic_across_processes: false` rather than promise it.
+- **Support can move by a replicate flipping.** Over six repeated 50-replicate
+  calls, three of four clades were bit-identical and one moved **0.02**, well
+  inside the bootstrap's own sampling error (~0.07 at 50 replicates). The
+  topology and every conclusion were unchanged. The column resampling itself is
+  numpy-seeded and exact.
 
-The practical size: over six repeated 50-replicate calls, three of four clades
-were bit-identical and one moved **0.02** — a single replicate flipping, well
-inside the bootstrap's own sampling error (~0.07 at 50 replicates). The topology
-and every conclusion were unchanged. This is reported in every response rather
-than papered over, because an MCP server is long-lived by design and that is
-exactly the condition which exposes it.
+Compare trees with `compare_trees`, and numbers with a tolerance — never by
+string equality.
 
 Threads are pinned to 1 before piqtree is imported: likelihood sums accumulate in
 thread-completion order, floating-point addition is not associative, and
-near-tied topologies can flip on the last bits.
+near-tied topologies can flip on the last bits. Pinning is necessary, not
+sufficient.
 
 ## Limitations
 

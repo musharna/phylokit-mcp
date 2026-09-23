@@ -128,6 +128,46 @@ def select_model(
     }
 
 
+# piqtree's own classification of a substitution model, mapped onto this
+# server's sequence_type vocabulary.
+_MODEL_KIND_TO_MOLTYPE = {"nucleotide": "dna", "protein": "protein"}
+
+
+def model_moltype(model: str) -> str:
+    """The molecule type a substitution model is defined over, per piqtree.
+
+    Parsed with piqtree's `make_model`, the same parser the engine call uses, so
+    a name it does not know is refused here with its message rather than later.
+    """
+    from piqtree.model import make_model
+
+    kind = make_model(model).submod_type.model_type()
+    try:
+        return _MODEL_KIND_TO_MOLTYPE[kind]
+    except KeyError:
+        raise ValueError(
+            f"Model {model!r} is a {kind} model; this server supports "
+            f"{sorted(_MODEL_KIND_TO_MOLTYPE.values())} only."
+        ) from None
+
+
+def require_model_for(model: str, moltype: str) -> None:
+    """Refuse a model defined over the other molecule type, before the engine.
+
+    IQ-TREE's own answer to `LG` on DNA, or `GTR` on protein, is "File not found
+    LG" -- a RuntimeError the server could only report as a crash, for what is a
+    mismatch in the caller's arguments.
+    """
+    wanted = model_moltype(model)
+    if wanted != moltype:
+        raise ValueError(
+            f"Model {model!r} is a {wanted} model but sequence_type is "
+            f"{moltype!r}. Use a {moltype} model"
+            + (" such as 'GTR+G' or 'HKY'" if moltype == "dna" else " such as 'LG+G'")
+            + f", or pass sequence_type={wanted!r} if the data are {wanted}."
+        )
+
+
 def build_ml_tree(
     seqs: dict[str, str], model: str, seed: int = 1, moltype: str = "dna"
 ):

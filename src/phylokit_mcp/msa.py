@@ -18,14 +18,14 @@ import tempfile
 from pathlib import Path
 
 from .alignment import (
-    _DNA,
     _NAME_OK,
-    _PROTEIN,
     MAX_SITES,
     MAX_TAXA,
     MOLTYPES,
     AlignmentError,
     parse_fasta,
+    stop_codon_hint,
+    unrecognised_characters,
 )
 
 # MAFFT needs two sequences to have anything to align. This is deliberately
@@ -134,8 +134,10 @@ def validate_unaligned(seqs: dict[str, str], moltype: str = "dna") -> None:
             "If the sequences are already aligned, pass them to infer_tree as "
             "they are."
         )
-    alphabet = _DNA if moltype == "dna" else _PROTEIN
-    bad = present - alphabet
+    # The same alphabet infer_tree accepts, not a second copy of it: MAFFT
+    # happily aligns `*` (stop) or `J`, and the output then carried
+    # ready_for_infer_tree=True into a call that could not parse it.
+    bad = unrecognised_characters(present, moltype)
     if bad:
         hint = (
             " If these are protein sequences, pass sequence_type='protein': the "
@@ -145,6 +147,7 @@ def validate_unaligned(seqs: dict[str, str], moltype: str = "dna") -> None:
         )
         raise AlignmentError(
             f"Unrecognised characters for {moltype}: {sorted(bad)[:8]}.{hint}"
+            f"{stop_codon_hint(bad)}"
         )
 
 

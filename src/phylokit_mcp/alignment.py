@@ -9,6 +9,7 @@ than an error. Unequal sequence lengths raise loudly in the engine; a
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass
 
@@ -16,11 +17,6 @@ MIN_TAXA = 4  # below this an unrooted tree has no internal edge to support
 MAX_TAXA = 200
 MAX_SITES = 100_000
 
-_DNA = set("ACGTUN-?RYSWKMBDHVacgtunryswkmbdhv.")
-# IUPAC amino acids plus ambiguity (B, Z, J, X), stop (*) and gaps. U is
-# selenocysteine here and uracil in _DNA -- the same letter meaning different
-# things is exactly why the molecule type is declared rather than sniffed.
-_PROTEIN = set("ACDEFGHIKLMNPQRSTVWYBZJXUO*-?.acdefghiklmnpqrstvwybzjxuo")
 MOLTYPES: tuple[str, ...] = ("dna", "protein")
 # States that count toward parsimony signal, per molecule type. Ambiguity codes
 # and gaps are excluded from both: they are not evidence of a shared state.
@@ -33,6 +29,41 @@ _NAME_OK = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 class AlignmentError(ValueError):
     """Raised when the input cannot support inference, with the reason named."""
+
+
+@functools.cache
+def _accepts(moltype: str, char: str) -> bool:
+    """Whether cogent3 accepts `char` in a sequence of `moltype`.
+
+    Asked of cogent3 rather than restated here. The previous hand-written sets
+    disagreed with it in both molecule types: `.` for DNA, and `*`, `.`, `J`,
+    `O` for protein, were passed by validate() and then rejected by cogent3's
+    AlphabetError inside the engine call, which the server could only report as
+    a crash. This mirrors what cogent3 does to a sequence on the way in --
+    `coerce_to` (case folding, U->T for DNA), then the most degenerate alphabet
+    -- so the two cannot drift apart again.
+    """
+    from cogent3 import get_moltype
+
+    mt = get_moltype(moltype)
+    raw = char.encode("utf8")
+    coerced = mt.coerce_to(raw) if mt.coerce_to else raw
+    return bool(mt.is_valid(coerced))
+
+
+def unrecognised_characters(chars: set[str], moltype: str) -> set[str]:
+    """The members of `chars` that cogent3 would reject for `moltype`."""
+    return {c for c in chars if not _accepts(moltype, c)}
+
+
+def stop_codon_hint(bad: set[str]) -> str:
+    """The one rejected character with an obvious remedy, named."""
+    if "*" not in bad:
+        return ""
+    return (
+        " '*' is a stop codon, and the engine has no state for it: trim stops "
+        "(or replace them with X) before aligning or inferring."
+    )
 
 
 @dataclass(frozen=True)
@@ -125,8 +156,7 @@ def validate(seqs: dict[str, str], moltype: str = "dna") -> None:
                 "underscore, dot or hyphen."
             )
 
-    alphabet = _DNA if moltype == "dna" else _PROTEIN
-    bad = {c for s in seqs.values() for c in s} - alphabet
+    bad = unrecognised_characters({c for s in seqs.values() for c in s}, moltype)
     if bad:
         hint = (
             " If this is a protein alignment, pass sequence_type='protein': the "
@@ -138,6 +168,7 @@ def validate(seqs: dict[str, str], moltype: str = "dna") -> None:
         )
         raise AlignmentError(
             f"Unrecognised characters for {moltype}: {sorted(bad)[:8]}.{hint}"
+            f"{stop_codon_hint(bad)}"
         )
 
 
@@ -230,10 +261,24 @@ def summarise(seqs: dict[str, str], moltype: str = "dna") -> AlignmentStats:
 
 
 def to_cogent3(seqs: dict[str, str], moltype: str = "dna"):
+    """The alignment as cogent3 holds it -- the input-parsing boundary.
+
+    cogent3 reports a character it cannot place with its own AlphabetError,
+    which is not a ValueError, so the server would mask it as a crash. It is
+    the caller's data that is wrong, so it is translated here into the
+    refusal type, with the offending characters named.
+    """
     from cogent3 import make_aligned_seqs
+    from cogent3.core.alphabet import AlphabetError
 
     if moltype not in MOLTYPES:
         raise AlignmentError(
             f"Unknown sequence_type {moltype!r}. Valid: {list(MOLTYPES)}."
         )
-    return make_aligned_seqs(seqs, moltype=moltype)
+    try:
+        return make_aligned_seqs(seqs, moltype=moltype)
+    except AlphabetError as exc:
+        bad = unrecognised_characters({c for s in seqs.values() for c in s}, moltype)
+        raise AlignmentError(
+            f"Unrecognised characters for {moltype}: {sorted(bad)[:8]} ({exc})."
+        ) from exc

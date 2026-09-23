@@ -110,7 +110,14 @@ def test_planted_indels_come_back_as_gaps_in_the_right_rows_and_columns():
 
     assert out["engine"]["name"] == "MAFFT"
     assert out["engine"]["version"].startswith("v")
-    assert out["ready_for_infer_tree"] is True
+    # Every substitution here is a singleton, so the alignment is correct AND
+    # carries no parsimony signal: infer_tree refuses it. This line used to
+    # assert True -- `ready` was a taxon count and said yes to output the next
+    # tool would reject. It is now infer_tree's own checks, so it says no, and
+    # says why.
+    assert out["alignment"]["n_parsimony_informative"] == 0
+    assert out["ready_for_infer_tree"] is False
+    assert [w["code"] for w in out["warnings"]].count("infer_tree_would_refuse") == 1
 
 
 def test_ragged_sequences_are_refused_by_infer_tree_then_accepted_once_aligned(
