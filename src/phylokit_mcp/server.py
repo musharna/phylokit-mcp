@@ -27,8 +27,8 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
+from . import __version__, diagnostics, msa
 from . import alignment as aln_mod
-from . import diagnostics, msa
 from .alignment import (
     MOLTYPES,
     AlignmentError,
@@ -547,7 +547,8 @@ def build_server() -> MCPServer:
     import, so nesting them would make the logic unreachable. Registering instead
     of nesting keeps both properties, and puts the whole tool surface in one place.
     """
-    mcp = MCPServer("phylokit-mcp", instructions=INSTRUCTIONS)
+    # `version` defaults to "" in MCPServer, which is what serverInfo carried.
+    mcp = MCPServer("phylokit-mcp", version=__version__, instructions=INSTRUCTIONS)
     mcp.tool(
         title="Infer a phylogenetic tree with bootstrap support",
         annotations=_READ_ONLY,

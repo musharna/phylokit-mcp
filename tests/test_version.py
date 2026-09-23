@@ -36,3 +36,28 @@ def test_reported_version_matches_the_one_the_project_declares():
     # If installed metadata disagrees with the checkout, the assertion above was
     # comparing against a stale install and proved nothing.
     assert version("phylokit-mcp") == declared
+
+
+def test_the_mcp_handshake_reports_the_package_version():
+    """serverInfo.version was "" -- MCPServer's default when none is passed.
+
+    The package version was right everywhere a Python caller could look and
+    absent from the one place an MCP client does. Read through a real client
+    session, not from the server object, because the handshake is the surface.
+    """
+    import anyio
+    from mcp.client.client import Client
+
+    from phylokit_mcp.server import build_server
+
+    async def go():
+        async with Client(build_server()) as c:
+            return c.server_info
+
+    info = anyio.run(go)
+    assert info.name == "phylokit-mcp"
+    # Against pyproject, not __version__ alone: "" == "" would also pass if the
+    # package version were ever empty.
+    declared = tomllib.loads(PYPROJECT.read_text())["project"]["version"]
+    assert declared
+    assert info.version == declared
