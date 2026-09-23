@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-09-23
+
 ### Fixed
 
 From the 2026-09-22 MCP-server bug audit.
