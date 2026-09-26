@@ -126,6 +126,53 @@ def test_a_close_model_choice_is_flagged(fasta_easy):
     assert ties
 
 
+def test_each_model_is_ranked_once_and_never_its_own_runner_up(fasta_easy):
+    """piqtree adds the best AIC/AICc/BIC models to `model_stats` a second time,
+    under `Model` keys that do not equal their string names. Ranked as is, the
+    winner appeared up to three times and was listed as indistinguishable from
+    itself (measured on this fixture: TPM2u x3, F81 x2).
+
+    Real engine output, not a constructed dict: the duplication is piqtree's,
+    and a constructed dict would only encode a belief about what piqtree returns.
+    """
+    result = select_substitution_model(
+        fasta=fasta_easy, criterion="AIC", seed=1, top_n=1000
+    )
+    names = [m["model"] for m in result["ranking"]]
+    assert len(names) == len(set(names)), sorted(
+        n for n in set(names) if names.count(n) > 1
+    )
+    assert result["n_models_compared"] == len(names)
+    assert result["best_model"] not in result["indistinguishable_from_best"]
+    # Positive control: deduplicating must not drop the real near-ties. JC
+    # generated these data and must still be ranked, and still be close.
+    assert "JC" in names
+    assert "JC" in result["indistinguishable_from_best"]
+    for criterion in CRITERIA:
+        assert result["best_by_criterion"][criterion] in names
+
+
+def test_a_name_reported_twice_with_different_statistics_is_refused():
+    """Duplicate keys are collapsed only when they carry the same statistics.
+
+    Two entries under one name that disagree are not something piqtree is
+    known to produce; picking one of them would hide it.
+    """
+
+    class Key:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def __str__(self) -> str:
+            return self.name
+
+    agreeing = {"m": FakeStat(-100.0, 5), Key("m"): FakeStat(-100.0, 5)}
+    assert [m.name for m in rank_models(agreeing, 500)] == ["m"]
+    clashing = {"m": FakeStat(-100.0, 5), Key("m"): FakeStat(-90.0, 5)}
+    with pytest.raises(RuntimeError, match="twice with different statistics"):
+        rank_models(clashing, 500)
+
+
 def test_criteria_agreement_is_reported(fasta_easy):
     result = select_substitution_model(fasta=fasta_easy, seed=1)
     assert set(result["best_by_criterion"]) == set(CRITERIA)

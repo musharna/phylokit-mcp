@@ -6,6 +6,25 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **`select_substitution_model` listed the best model as its own runner-up.**
+  piqtree 0.8.3's `model_stats` repeats the best AIC, AICc and BIC models
+  under `Model` object keys beside their string names, so the winner appeared
+  up to three times in `ranking` and in `indistinguishable_from_best`, and
+  `n_models_compared` counted the copies. Entries are now collapsed by name;
+  two entries under one name with different statistics are refused.
+- **The engine is IQ-TREE 3, not IQ-TREE 2.** piqtree 0.8 builds IQ-TREE 3
+  (3.1.2 in 0.8.3). The engine name, README, citation metadata and NOTICE now
+  say so, and CITATION.cff cites the IQ-TREE 3 and piqtree papers.
+- `capabilities` and `infer_tree`'s `engine` now report `iqtree_version`
+  beside `engine_version`, which is, and always was, piqtree's version.
+- `infer_tree` and `select_substitution_model` docstrings: protein is accepted,
+  and the model tool is `select_substitution_model`, not `select_model`.
+- README: the model-selection example now states what the current fixture
+  gives; the stale test count and the per-replicate timing, measured on an
+  unstated host, are removed.
+
 ## [0.5.1] — 2026-09-23
 
 ### Fixed

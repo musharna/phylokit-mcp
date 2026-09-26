@@ -1,13 +1,13 @@
 # Contributing
 
-Thanks for helping improve `phylokit-mcp`. It is an MCP server exposing IQ-TREE 2 phylogenetic inference via piqtree, and it never returns a topology without its support.
+Thanks for helping improve `phylokit-mcp`. It is an MCP server exposing IQ-TREE 3 phylogenetic inference via piqtree, and it never returns a topology without its support.
 
 ## Dev setup
 
 Requires Python >=3.12 and [`uv`](https://docs.astral.sh/uv/).
 
 Python 3.12+ is a hard floor: piqtree publishes wheels for 3.12 and up, and it
-is the inference engine. piqtree ships IQ-TREE 2 as a wheel, so there is no
+is the inference engine. piqtree ships IQ-TREE 3 as a wheel, so there is no
 separate IQ-TREE binary and no version skew between a CLI and the library.
 
 One system package IS needed: **MAFFT**, on `PATH`, for `align_sequences`

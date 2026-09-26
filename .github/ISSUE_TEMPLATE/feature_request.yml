@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        This server wraps IQ-TREE 2 via piqtree. Features IQ-TREE does not expose to piqtree cannot be surfaced here — bootstrap support values are the known example.
+        This server wraps IQ-TREE 3 via piqtree. Features IQ-TREE does not expose to piqtree cannot be surfaced here — bootstrap support values are the known example.
   - type: textarea
     id: problem
     attributes:

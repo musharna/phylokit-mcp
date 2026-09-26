@@ -20,7 +20,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 _INSTALL_HINT = (
-    "phylokit-mcp needs piqtree, the official IQ-TREE 2 Python bindings.\n"
+    "phylokit-mcp needs piqtree, the official IQ-TREE Python bindings (IQ-TREE 3 in piqtree 0.8).\n"
     "Install it with:  pip install 'piqtree>=0.8,<0.9'\n"
     "piqtree publishes prebuilt wheels for Python 3.12+ on Linux and macOS; if "
     "pip is trying to build from source, check that your Python is 3.12 or newer."
@@ -47,7 +47,13 @@ def piqtree() -> Any:
 
 
 def engine_version() -> str:
+    """piqtree's version. Not IQ-TREE's: see `iqtree_version`."""
     return str(getattr(piqtree(), "__version__", "unknown"))
+
+
+def iqtree_version() -> str:
+    """The version of the IQ-TREE build compiled into piqtree (3.x for 0.8)."""
+    return str(getattr(piqtree(), "__iqtree_version__", "unknown"))
 
 
 def threads_pinned() -> bool:

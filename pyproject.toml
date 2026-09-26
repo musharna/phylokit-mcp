@@ -4,7 +4,7 @@ version = "0.5.1"
 description = "MCP server for phylogenetic inference — never returns a topology without its support"
 readme = "README.md"
 # GPL-2.0-ONLY, and the "only" is load-bearing. piqtree declares
-# License-Expression: GPL-2.0-only (it wraps IQ-TREE 2), and GPL-2.0-only is
+# License-Expression: GPL-2.0-only (it wraps IQ-TREE 3), and GPL-2.0-only is
 # INCOMPATIBLE with GPL-3.0 — the two cannot be combined and redistributed. This
 # package imports piqtree directly, so the distributed combination must be
 # GPL-2.0-only. cogent3, the other direct dependency, is BSD and imposes nothing.

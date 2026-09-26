@@ -9,15 +9,15 @@
 
 <!-- mcp-name: io.github.musharna/phylokit-mcp -->
 
-Phylogenetic inference over MCP, driving IQ-TREE 2 through
-[piqtree](https://github.com/cogent3/piqtree).
+Phylogenetic inference over MCP, driving IQ-TREE 3 through
+[piqtree](https://github.com/cogent3/piqtree) 0.8, which builds IQ-TREE 3 into
+its wheel.
 
 **A topology without support is not a result.** `infer_tree` always runs a
 bootstrap and always returns per-clade support. There is no flag to skip it.
 
-6 tools, 105 tests against real IQ-TREE and real MAFFT (no mocked engine), 23
-mutation checks,
-and a real-process JSON-RPC handshake test.
+6 tools. The test suite runs real IQ-TREE and real MAFFT (no mocked engine),
+and includes 23 mutation checks and a real-process JSON-RPC handshake test.
 
 ## Why the rule
 
@@ -46,9 +46,10 @@ result the caller cannot evaluate.
 - **`fraction_resolved`** — the share of clades clearing 0.70. The headline
   number, before any individual grouping is repeated as fact.
 - **Model runners-up with ΔAIC** — not just a winner. On the 300-site alignment
-  above, simulated under **JC**, the AIC winner is **F81**, with several models
-  inside the conventional ±2 indistinguishability margin. A winner without its
-  margin is a claim the numbers do not support.
+  above, simulated under **JC**, the AIC winner is **not JC** (TPM2u and TPM2
+  tie at the top), and several other models, JC among them at ΔAIC 0.7, sit
+  inside the conventional ±2 indistinguishability margin (`seed=1`, piqtree
+  0.8.3). A winner without its margin is a claim the numbers do not support.
 - **Length versus evidence** — `n_parsimony_informative` alongside `n_sites`.
   A 10,000-site alignment of near-identical sequences supports nothing.
 
@@ -61,7 +62,7 @@ result the caller cannot evaluate.
 | `compare_trees`             | Robinson–Foulds distance and the clades that differ. Compares splits, not strings. |
 | `simulate_alignment`        | Generates sequences along a tree you specify — the positive control.               |
 | `align_sequences`           | Aligns unaligned FASTA with MAFFT; the output goes straight into `infer_tree`.     |
-| `capabilities`              | Engine version, 215 substitution models, enforced limits.                          |
+| `capabilities`              | piqtree and IQ-TREE versions, 215 substitution models, MAFFT version, limits.      |
 
 ## Install
 
@@ -142,8 +143,9 @@ sufficient.
   nonparametric bootstrap (Felsenstein 1985), computed here rather than read back
   from IQ-TREE, because piqtree 0.8.3 runs `bootstrap_replicates` but does not
   expose the resulting values.
-- **Cost is linear in replicates.** ~130 ms per replicate at 7 taxa / 300 sites,
-  and it grows with taxon count. Capped at 200 taxa and 1000 replicates.
+- **Cost is linear in replicates.** Each replicate is a full maximum-likelihood
+  search on a resampled alignment, so it grows with taxon count, alignment
+  length and model complexity. Capped at 200 taxa and 1000 replicates.
 - **Alignment is MAFFT `--auto`, single-threaded, and nothing else.** No choice
   of strategy, no profile alignment, no trimming, at most 200 sequences of
   100,000 residues, and a 600 s wall-clock cap. Input that already contains gaps
@@ -158,9 +160,13 @@ which is _incompatible_ with GPL-3.0, so the distributed combination cannot be
 GPL-3. cogent3 is BSD and imposes nothing.
 
 Unofficial. Not affiliated with, endorsed by, or sponsored by the IQ-TREE authors
-or the cogent3 project. **IQ-TREE 2 is academic software and expects to be cited**
-— if results from this server appear in published work, cite IQ-TREE 2 as
-directed at [iqtree.org](http://www.iqtree.org/), not this wrapper. The same
-holds for MAFFT when `align_sequences` produced the alignment: Katoh & Standley
-2013, [doi:10.1093/molbev/mst010](https://doi.org/10.1093/molbev/mst010). MAFFT is
+or the cogent3 project. **IQ-TREE is academic software and expects to be cited**
+— if results from this server appear in published work, cite IQ-TREE 3 as
+directed at [iqtree.org](http://www.iqtree.org/) (currently Wong et al. 2026,
+[doi:10.1093/molbev/msag117](https://doi.org/10.1093/molbev/msag117), plus the
+paper for any method used, such as ModelFinder), and piqtree, McArthur et al.
+2026, [doi:10.1093/molbev/msag061](https://doi.org/10.1093/molbev/msag061) —
+not this wrapper. The same holds for MAFFT when `align_sequences` produced the
+alignment: Katoh & Standley 2013,
+[doi:10.1093/molbev/mst010](https://doi.org/10.1093/molbev/mst010). MAFFT is
 BSD-licensed and is run as a separate program, not linked. See [NOTICE](NOTICE).

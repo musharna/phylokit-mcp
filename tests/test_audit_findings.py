@@ -135,6 +135,24 @@ def test_the_tree_carries_the_engine_that_built_it():
         next(c.text for c in (cap.content or []) if getattr(c, "text", None))
     )
     assert out["engine"]["version"] == caps["engine_version"]
+    assert out["engine"]["iqtree_version"] == caps["iqtree_version"]
+
+
+def test_the_engine_version_is_labelled_for_what_it_is():
+    """`engine_version` is piqtree's version, and was the only version reported,
+    so a reader took it for IQ-TREE's. IQ-TREE's own version is reported beside
+    it, read from the build piqtree actually loaded, not restated here."""
+    import piqtree
+
+    from phylokit_mcp.server import capabilities
+
+    caps = capabilities()
+    assert caps["iqtree_version"] == piqtree.__iqtree_version__
+    assert caps["iqtree_version"].split(".")[0] == "3"
+    assert "IQ-TREE 3" in caps["engine"]
+    # Positive control: the piqtree version is still where callers read it.
+    assert caps["engine_version"] == piqtree.__version__
+    assert caps["engine_version"] != caps["iqtree_version"]
 
 
 def test_branch_lengths_state_their_units():
