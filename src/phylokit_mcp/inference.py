@@ -2,10 +2,10 @@
 
 Model selection returns the runners-up, not just the winner. IQ-TREE's
 `model_finder` reports a single best model per criterion, and a caller handed one
-name will state it as a finding. Measured on a 400-site alignment simulated under
-JC, the AIC winner is F81 — a model the data were not generated under — and the
-margin over JC is small enough that the ranking would not survive a different
-seed. A winner without its margin is a claim the numbers do not support.
+name will state it as a finding. Measured on the test suite's 300-site alignment
+simulated under JC (piqtree 0.8.3, seed 1), the AIC winner is TPM2u (tied with
+TPM2) — a model the data were not generated under — and JC trails it by only 0.7 AIC units. A
+winner without its margin is a claim the numbers do not support.
 """
 
 from __future__ import annotations
@@ -54,6 +54,35 @@ def _information_criteria(
     return aic, aicc, bic
 
 
+def _stats_by_name(model_stats: dict) -> dict[str, object]:
+    """One entry per model name.
+
+    piqtree 0.8.3's `ModelFinderResult.model_stats` holds every model under its
+    string name, then adds the best AIC, AICc and BIC models again under `Model`
+    object keys, which do not compare equal to those strings. Iterated as is,
+    the best model appeared up to three times and was listed as
+    indistinguishable from itself. The extra keys carry the same statistics as
+    the string key; two entries under one name that DISAGREE would be a
+    different, unexplained state, so that is refused rather than resolved.
+    """
+    by_name: dict[str, object] = {}
+    for key, stat in model_stats.items():
+        name = str(key)
+        if name not in by_name:
+            by_name[name] = stat
+            continue
+        seen = by_name[name]
+        fields = ("lnL", "nfp")
+        if [getattr(seen, f, None) for f in fields] != [
+            getattr(stat, f, None) for f in fields
+        ]:
+            raise RuntimeError(
+                f"model_finder reported {name!r} twice with different "
+                f"statistics: {seen!r} and {stat!r}."
+            )
+    return by_name
+
+
 def rank_models(
     model_stats: dict, n_sites: int, criterion: str = "AIC"
 ) -> list[ModelScore]:
@@ -62,15 +91,13 @@ def rank_models(
         raise ValueError(f"criterion must be one of {CRITERIA}, got {criterion!r}")
 
     scored: list[ModelScore] = []
-    for name, stat in model_stats.items():
+    for name, stat in _stats_by_name(model_stats).items():
         lnl = getattr(stat, "lnL", None)
         k = getattr(stat, "nfp", None)
         if lnl is None or k is None:
             continue
         aic, aicc, bic = _information_criteria(float(lnl), int(k), n_sites)
-        scored.append(
-            ModelScore(str(name), float(lnl), int(k), aic, aicc, bic, delta=0.0)
-        )
+        scored.append(ModelScore(name, float(lnl), int(k), aic, aicc, bic, delta=0.0))
 
     def key(m: ModelScore) -> float:
         value = {
