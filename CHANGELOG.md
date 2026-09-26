@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-26
+
 ### Fixed
 
 - **`select_substitution_model` listed the best model as its own runner-up.**
@@ -24,6 +26,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - README: the model-selection example now states what the current fixture
   gives; the stale test count and the per-replicate timing, measured on an
   unstated host, are removed.
+- SECURITY.md names the one subprocess (MAFFT, for `align_sequences`: argument list, no shell,
+  fixed options, timeout) instead of claiming there is none, and drops the personal email.
 
 ## [0.5.1] — 2026-09-23
 
