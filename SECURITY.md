@@ -27,8 +27,11 @@ fix ships, you'll be credited in the release notes unless you ask otherwise.
 This server runs **phylogenetic inference in-process** through `piqtree`, which
 embeds IQ-TREE 3 as a library.
 
-- **No subprocess and no shell.** IQ-TREE is invoked through piqtree's Python
-  bindings, not by building a command line, so there is no shell-quoting surface.
+- **No shell.** IQ-TREE is invoked through piqtree's Python bindings, not by
+  building a command line. The one subprocess is MAFFT, for `align_sequences`:
+  it is started from an argument list (never through a shell) with a fixed set
+  of options, reads the sequences from a file the server writes in a private
+  temporary directory, has stdin closed, and is killed at a timeout.
 - **Alignments arrive as data, not as paths.** The tools take sequence data
   inline; the server does not open caller-supplied file paths, so it cannot be
   steered into reading arbitrary files off the host.
