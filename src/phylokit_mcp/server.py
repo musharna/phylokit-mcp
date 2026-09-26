@@ -64,7 +64,7 @@ from .splits import (
 )
 
 INSTRUCTIONS = f"""\
-Phylogenetic inference over IQ-TREE 2.
+Phylogenetic inference over IQ-TREE 3, through piqtree.
 
 The rule this server is built around: **a topology without support is not a
 result.** `infer_tree` always runs a bootstrap and always returns per-clade
@@ -197,7 +197,10 @@ class CompareResult(TypedDict):
 
 class CapabilitiesResult(TypedDict):
     engine: str
+    # piqtree's version, not IQ-TREE's; the key name is kept for existing
+    # callers. IQ-TREE's own version is `iqtree_version`.
     engine_version: str
+    iqtree_version: str
     substitution_models: NotRequired[list[str]]
     n_substitution_models: int
     criteria: list[str]
@@ -254,10 +257,12 @@ def infer_tree(
     unsupported topology is the failure mode this server exists to prevent.
 
     Args:
-        fasta: Aligned nucleotide sequences in FASTA. All sequences must be the
-            same length — run `align_sequences` first if they are not.
-        model: Substitution model, e.g. "JC", "HKY", "GTR+G". Run `select_model`
-            first if you do not have a reason to prefer one.
+        fasta: Aligned sequences in FASTA, nucleotide or protein as declared by
+            `sequence_type`. All sequences must be the same length — run
+            `align_sequences` first if they are not.
+        model: Substitution model, e.g. "JC", "HKY", "GTR+G" (or "LG+G" for
+            protein). Run `select_substitution_model` first if you do not have a
+            reason to prefer one.
         replicates: Bootstrap replicates (20-1000). Cost is roughly linear in
             this, so 100 is a reasonable default and 1000 is for a final answer.
         seed: 0 to 2**31-1. Fixes the column resampling exactly; the engine's
@@ -296,7 +301,11 @@ def infer_tree(
         alignment=stats.__dict__,  # type: ignore[typeddict-item]
         support=support.as_dict(),  # type: ignore[typeddict-item]
         reproducibility=engine.reproducibility(),
-        engine={"name": "IQ-TREE 2 via piqtree", "version": engine.engine_version()},
+        engine={
+            "name": "IQ-TREE 3 via piqtree",
+            "version": engine.engine_version(),
+            "iqtree_version": engine.iqtree_version(),
+        },
         branch_length_units="substitutions per site",
         warnings=diagnostics.collect(
             stats=stats,
@@ -320,7 +329,8 @@ def select_substitution_model(
     model, and whether AIC/AICc/BIC agree are what make it one.
 
     Args:
-        fasta: Aligned nucleotide sequences in FASTA.
+        fasta: Aligned sequences in FASTA, nucleotide or protein as declared by
+            `sequence_type`.
         criterion: "AIC", "AICc" or "BIC". BIC penalises parameters more heavily.
         seed: Fixes the engine's search.
         top_n: How many ranked models to return.
@@ -517,6 +527,9 @@ def align_sequences(fasta: str, sequence_type: str = "dna") -> AlignResult:
 def capabilities(include_models: bool = False) -> CapabilitiesResult:
     """What this server can do, and the bounds it enforces.
 
+    `engine_version` is the installed piqtree version (e.g. "0.8.3");
+    `iqtree_version` is the IQ-TREE build inside it (e.g. "3.1.2").
+
     Args:
         include_models: Include the full substitution-model list (long).
     """
@@ -532,8 +545,9 @@ def capabilities(include_models: bool = False) -> CapabilitiesResult:
     except msa.MafftFailedError as exc:
         aligner_error = str(exc)
     out = CapabilitiesResult(
-        engine="IQ-TREE 2 via piqtree",
+        engine="IQ-TREE 3 via piqtree",
         engine_version=engine.engine_version(),
+        iqtree_version=engine.iqtree_version(),
         n_substitution_models=len(models),
         criteria=list(CRITERIA),
         aligner_version=aligner_version,

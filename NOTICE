@@ -19,8 +19,8 @@ Third-party dependencies
     piqtree   — https://github.com/cogent3/piqtree
     License   — GPL-2.0-only
 
-    IQ-TREE 2 — http://www.iqtree.org/
-    Source    — https://github.com/iqtree/iqtree2
+    IQ-TREE 3 — http://www.iqtree.org/ (built into piqtree's wheel)
+    Source    — https://github.com/iqtree/iqtree3
     License   — GPL-2.0
 
     MAFFT     — https://mafft.cbrc.jp/alignment/software/
@@ -31,11 +31,12 @@ Third-party dependencies
 Citation
 --------------------------------------------------------------------------------
 
-IQ-TREE 2 is academic software and expects to be cited when used in published
+IQ-TREE is academic software and expects to be cited when used in published
 work. This server drives it; it does not replace that obligation. If results from
-this tool appear in a publication, cite IQ-TREE 2 — and the substitution-model
+this tool appear in a publication, cite IQ-TREE 3 — and the substitution-model
 selection or bootstrap method actually used — as directed at
-http://www.iqtree.org/, not this wrapper.
+http://www.iqtree.org/, and piqtree (doi:10.1093/molbev/msag061), not this
+wrapper. CITATION.cff lists both papers.
 
 Author and institution details are deliberately not restated here. They belong to
 the upstream project, which publishes its own current citation; a hand-copied

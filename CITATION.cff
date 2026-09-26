@@ -1,12 +1,12 @@
 cff-version: 1.2.0
 message: >-
-  If you use phylokit-mcp in your work, please cite it as below. IQ-TREE 2 is the
-  inference engine this server drives and must be cited separately — see
-  references.
+  If you use phylokit-mcp in your work, please cite it as below. IQ-TREE 3 is the
+  inference engine this server drives, through piqtree, and both must be cited
+  separately — see references.
 title: phylokit-mcp
 abstract: >-
   A Model Context Protocol (MCP) server for phylogenetic inference, driving
-  IQ-TREE 2 through piqtree. It enforces one structural rule: a topology without
+  IQ-TREE 3 through piqtree. It enforces one structural rule: a topology without
   support is not a result. Tree inference always runs a bootstrap and always
   returns per-clade support, with no flag to skip it. Threads are pinned before
   the engine is imported, because likelihood sums accumulate in a
@@ -32,33 +32,78 @@ keywords:
   - mcp
 references:
   - type: article
-    title: "IQ-TREE 2: New Models and Efficient Methods for Phylogenetic Inference in the Genomic Era"
+    title: "IQ-TREE 3: Phylogenomic Inference Software Using Complex Evolutionary Models"
     authors:
-      - family-names: Minh
-        given-names: Bui Quang
-      - family-names: Schmidt
-        given-names: Heiko A.
-      - family-names: Chernomor
-        given-names: Olga
-      - family-names: Schrempf
-        given-names: Dominik
-      - family-names: Woodhams
-        given-names: Michael D.
-      - family-names: von Haeseler
-        given-names: Arndt
+      - family-names: Wong
+        given-names: Thomas K. F.
+      - family-names: Ly-Trong
+        given-names: Nhan
+      - family-names: Ren
+        given-names: Huaiyan
+      - family-names: Demotte
+        given-names: Piyumal
+      - family-names: "Baños"
+        given-names: Hector
+      - family-names: Roger
+        given-names: Andrew J.
+      - family-names: Susko
+        given-names: Edward
+      - family-names: Bielow
+        given-names: Chris
+      - family-names: "De Maio"
+        given-names: Nicola
+      - family-names: Goldman
+        given-names: Nick
+      - family-names: Hahn
+        given-names: Matthew W.
+      - family-names: "dos Reis"
+        given-names: Mario
+      - family-names: Vinh
+        given-names: Le Sy
+      - family-names: Huttley
+        given-names: Gavin
       - family-names: Lanfear
         given-names: Robert
+      - family-names: Minh
+        given-names: Bui Quang
     journal: Molecular Biology and Evolution
-    volume: 37
+    volume: 43
     issue: 5
-    year: 2020
-    doi: 10.1093/molbev/msaa015
+    year: 2026
+    doi: 10.1093/molbev/msag117
     notes: >-
-      The inference engine this server drives, and academic software that expects
-      to be cited. Cite IQ-TREE 2 — and the substitution-model selection or
-      bootstrap method actually used — for any published result; citing the
-      wrapper does not discharge that. A corrigendum exists at
-      10.1093/molbev/msaa131.
+      The inference engine this server drives (piqtree 0.8 builds IQ-TREE 3
+      into its wheel), and academic software that expects to be cited. This is
+      the general IQ-TREE 3 citation given at iqtree.org; cite it — and the
+      substitution-model selection or bootstrap method actually used, as
+      listed there — for any published result. Citing the wrapper does not
+      discharge that.
+  - type: article
+    title: "piqtree: A Python Package for Seamless Phylogenetic Inference with IQ-TREE"
+    authors:
+      - family-names: McArthur
+        given-names: Robert Neil
+      - family-names: Wong
+        given-names: Thomas King-Fung
+      - family-names: Lang
+        given-names: Yapeng
+      - family-names: Morris
+        given-names: Richard Andrew
+      - family-names: Caley
+        given-names: Katherine
+      - family-names: Mallawaarachchi
+        given-names: Vijini
+      - family-names: Minh
+        given-names: Bui Quang
+      - family-names: Huttley
+        given-names: Gavin
+    journal: Molecular Biology and Evolution
+    volume: 43
+    issue: 3
+    year: 2026
+    doi: 10.1093/molbev/msag061
+    notes: >-
+      The Python bindings this server calls IQ-TREE through.
   - type: article
     title: "MAFFT Multiple Sequence Alignment Software Version 7: Improvements in Performance and Usability"
     authors:

@@ -25,7 +25,7 @@ fix ships, you'll be credited in the release notes unless you ask otherwise.
 ## Security model
 
 This server runs **phylogenetic inference in-process** through `piqtree`, which
-embeds IQ-TREE 2 as a library.
+embeds IQ-TREE 3 as a library.
 
 - **No subprocess and no shell.** IQ-TREE is invoked through piqtree's Python
   bindings, not by building a command line, so there is no shell-quoting surface.
