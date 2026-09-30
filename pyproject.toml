@@ -107,3 +107,4 @@ ignore_missing_imports = true
 
 [tool.mutmut]
 source_paths = ["src"]
+also_copy = [".editorconfig", ".github", ".gitignore", ".mcp.json", ".pre-commit-config.yaml", ".zenodo.json", "CHANGELOG.md", "CITATION.cff", "CLAUDE.md", "CONTRIBUTING.md", "LESSONS.md", "LICENSE", "NOTICE", "README.md", "SECURITY.md", "assets", "docs", "glama.json", "scripts", "server.json"]
