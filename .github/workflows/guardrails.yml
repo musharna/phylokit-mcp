@@ -3,6 +3,7 @@ name: guardrails
 # From ~/repo-template (scripts/guardrails-sync.sh). Runs on every PR/push:
 #   lint      pre-commit (ruff, shellcheck, house rules)
 #   test      pytest, then pytest again with NO network (empty netns)
+#   wheel     build the wheel, install it in a clean venv outside the repo, import it
 #   security  pip-audit + bandit
 #   review    Claude code review posted on the PR (needs CLAUDE_CODE_OAUTH_TOKEN)
 # Action SHAs verified to exist on 2026-09-11.
@@ -37,10 +38,32 @@ jobs:
           # Repo-specific system prerequisites (R for rpy2, OpenCV libs, ...) live in
           # scripts/guardrails-setup.sh so the template stays generic.
           if [ -x scripts/guardrails-setup.sh ]; then bash scripts/guardrails-setup.sh; fi
-          uv sync --all-extras --dev
+          # assignment, not inline $(...): a helper failure must stop the step
+          extras_s=$(python3 scripts/uv_extras.py)
+          read -ra extras <<<"$extras_s"
+          uv sync "${extras[@]}" --dev
           if [ -f requirements-dev.txt ]; then uv pip install -r requirements-dev.txt; fi
           if [ -x .venv/bin/ruff ]; then echo "repo ruff: "; .venv/bin/ruff check .
           else echo "template ruff 0.16.7"; uvx ruff@0.16.7 check .; fi
+      # The verify-half of "CI verifies, local fixes". ruff-format is SKIPped
+      # below because an auto-fixing hook rewrites files in CI and reports that
+      # as failure; --check rewrites nothing, so the contract keeps both halves.
+      #
+      # PINNED, and deliberately NOT the "repo's own ruff" pattern above. A
+      # linter reports violations of rules, so a repo may reasonably hold its own
+      # baseline; a FORMATTER is a canonicaliser, and two minors disagree about
+      # what canonical means. plant-genomics-mcp resolves ruff 0.15.13 in uv.lock
+      # while .pre-commit-config.yaml pins 0.16.7: the same tree reads clean under
+      # one and dirty under the other. Checking format with a version other than
+      # the one that WRITES it fails correctly-formatted code. This pin must equal
+      # the ruff-pre-commit rev in .pre-commit-config.yaml; the sync selftest
+      # asserts that, because nothing else would notice them drifting apart.
+      #
+      # --exclude '*.md': 0.16.7 also formats fenced code blocks in Markdown and
+      # 0.15.13 does not. Gating READMEs across the fleet is a bigger change than
+      # gating Python, so this stays Python-only until that is asked for.
+      - name: ruff format --check (the formatter's output is the code)
+        run: uvx ruff@0.16.7 format --check . --exclude '*.md'
       - name: pre-commit non-modifying hooks + house rules (all files)
         env:
           SKIP: ruff-check,ruff-format,end-of-file-fixer,trailing-whitespace
@@ -60,8 +83,11 @@ jobs:
           # Repo-specific system prerequisites (R for rpy2, OpenCV libs, ...) live in
           # scripts/guardrails-setup.sh so the template stays generic.
           if [ -x scripts/guardrails-setup.sh ]; then bash scripts/guardrails-setup.sh; fi
-          if [ -f uv.lock ]; then uv sync --locked --all-extras --dev
-          else uv sync --all-extras --dev; fi
+          # assignment, not inline $(...): a helper failure must stop the step
+          extras_s=$(python3 scripts/uv_extras.py)
+          read -ra extras <<<"$extras_s"
+          if [ -f uv.lock ]; then uv sync --locked "${extras[@]}" --dev
+          else uv sync "${extras[@]}" --dev; fi
           # repos that pin test deps outside pyproject (taxon3d)
           if [ -f requirements-dev.txt ]; then uv pip install -r requirements-dev.txt; fi
       - name: Tests
@@ -94,22 +120,63 @@ jobs:
             exec sudo -u "$SUDO_USER" --preserve-env="$1" "$2" run --offline --with pytest pytest -q -p no:cacheprovider
           ' sh "$KEEP" "$UV"
 
+  wheel:
+    # The test job installs the project editable, so it imports the SOURCE TREE:
+    # a module or data file the build leaves out is there for every test and
+    # missing for every user. This job uses the artifact that gets published.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - name: The smoke check can fail (negative controls)
+        run: bash scripts/wheel-smoke-selftest.sh
+      - name: Built wheel installs and imports outside the source tree
+        run: |
+          if [ -x scripts/guardrails-setup.sh ]; then bash scripts/guardrails-setup.sh; fi
+          python3 scripts/wheel_smoke.py .
+
   security:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # deps_changed.sh diffs against the PR base / pre-push sha
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - name: Did this change touch what gets installed?
+        # pip-audit here answers "did THIS diff bring in a vulnerable package?".
+        # "Has a CVE been published against what is already on the default
+        # branch?" is the nightly audit job's question: it opens an issue, it does
+        # not turn an unrelated PR red (anyio, 2026-09-18, held two syncs).
+        id: deps
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          bash scripts/deps-changed-selftest.sh
+          if bash scripts/deps_changed.sh; then echo "audit=1" >> "$GITHUB_OUTPUT"; else
+            echo "audit=0" >> "$GITHUB_OUTPUT"
+            echo "::notice::pip-audit skipped: no dependency file changed. The nightly audit job covers newly published CVEs."
+          fi
       - name: pip-audit (known-vulnerable dependencies)
+        if: steps.deps.outputs.audit == '1'
         run: |
           # Repo-specific system prerequisites (R for rpy2, OpenCV libs, ...) live in
           # scripts/guardrails-setup.sh so the template stays generic.
           if [ -x scripts/guardrails-setup.sh ]; then bash scripts/guardrails-setup.sh; fi
-          uv sync --all-extras --dev
+          # assignment, not inline $(...): a helper failure must stop the step
+          extras_s=$(python3 scripts/uv_extras.py)
+          read -ra extras <<<"$extras_s"
+          uv sync "${extras[@]}" --dev
           if [ -f requirements-dev.txt ]; then uv pip install -r requirements-dev.txt; fi
           # Audit the resolved dependency set, not the project itself (which may
           # not be on PyPI; --strict treats an unauditable/editable dist as failure).
-          uv export --all-extras --dev --no-emit-project --no-hashes -o /tmp/req.txt
+          uv export "${extras[@]}" --dev --no-emit-project --no-hashes -o /tmp/req.txt
+          # requirements-dev.txt is installed above but is not in the export: audit it too.
+          if [ -f requirements-dev.txt ]; then uv pip freeze | grep -v '^-e ' > /tmp/req-env.txt; else : > /tmp/req-env.txt; fi
           uvx pip-audit -r /tmp/req.txt --strict --desc on
+          if [ -s /tmp/req-env.txt ]; then uvx pip-audit -r /tmp/req-env.txt --desc on; fi
       - name: bandit (insecure code patterns, medium+ severity)
         run: uvx bandit -q -r . -ll -x ./tests,./.venv,./mutants
 

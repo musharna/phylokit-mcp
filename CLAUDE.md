@@ -43,6 +43,8 @@ Each rule is an incident, not a preference:
 - `# nosec` names the test id AND a traced reason.
 - No nested lazy quantifiers; no `nohup ... &`; no `text-transform: uppercase`
   over unit strings; no absolute developer-machine paths.
+- No fixed sleep before a click, focus, hover or key press in a browser test: wait for
+  the state the sleep stood in for.
 
 Never narrow, skip or `--no-verify` a hook to get a commit through. If a hook
 is wrong, fix the hook in `repo-template` and resync.
@@ -58,7 +60,12 @@ the diff means the bar was missed. The fix is two commits, not one:
    If the class can be caught by a hook or a lint rule, add the hook to
    `repo-template` in the same PR. Prose that must hold every time is a hook.
 
-## 5. Reporting
+## 5. Analysis code
+
+If this repo has `guardrails-analysis.yml`, the result is the product and it can be wrong while every
+test is green: read `ANALYSIS-BAR.md` before writing analysis code. It is part of this contract.
+
+## 6. Reporting
 
 Lead with defects, then what was verified and how (command + exit status),
 then what was not verified. "Done" means the acceptance check from section 1
