@@ -70,7 +70,27 @@ repos:
         name: "text-transform: uppercase maps µ (U+00B5) to LATIN M; units read 1000x wrong"
         language: pygrep
         files: '\.(css|scss|html|svelte|vue|jsx|tsx)$'
-        entry: 'text-transform\s*:\s*uppercase'
+        # Anchored to a DECLARATION (line start, `{` or `;` before it): a comment
+        # that mentions the rule (wildeye style.css:9553 explains why it is
+        # avoided) is not a use of it. A use over text that can never hold a
+        # unit (a page title, a button) is allowed with a traced reason on the
+        # same line: `/* uppercase-ok: page title, no unit text */`.
+        entry: '(^\s*|[;{]\s*)text-transform\s*:\s*uppercase(?!.*uppercase-ok:\s*[^\s*/])'
+
+      - id: no-sleep-then-interact
+        name: "a fixed sleep, then a click/focus/hover/tap/key press: wait for the state instead"
+        language: pygrep
+        files: '\.(m?js|cjs|m?ts|jsx|tsx)$'
+        args: [--multiline]
+        # wildeye 2026-09-27/28: four browser-test misses were a fixed sleep lost
+        # to a transition or a pending timer, and 16 "sleep 12 s, press Escape"
+        # boot steps had nothing left to act on. An awaited sleep (sleep/delay/
+        # wait/pause(N), new Promise(r => setTimeout(r, N)), x.waitForTimeout(N))
+        # whose NEXT line interacts is flagged. A duration that is the point is
+        # allowed with a reason on the sleep's line: `// qa-wait-ok: <why>`.
+        # Adjacent lines only (pygrep has no parser); wildeye's
+        # scripts/lint-qa-waits.mjs is the statement-level version.
+        entry: '^[ \t]*await[ \t]+(?:(?:sleep|delay|wait|pause)\([^()\n]*\)|new[ \t]+Promise\([^\n]*setTimeout[^\n]*|[\w.$]+\.waitForTimeout\([^()\n]*\))(?![^\n]*qa-wait-ok:[ \t]*\S)[^\n]*\n[^\n]*\.(?:click|focus|hover|tap|press|type)\('
 
       - id: no-dev-paths
         name: "absolute developer-machine paths in tracked files (real machine names only; placeholder homes pass)"
@@ -80,3 +100,16 @@ repos:
         # Bracketed last char so this file never contains the literal it hunts
         # (a gate whose scope includes its own definition flags itself).
         entry: '/home[/]mjarnol[d]|/mnt/c[/]Users/a2b3[2]|C:\\Users\\a2b3[2]'
+
+      # The same rule set CI runs (guardrails.yml security job: bandit -ll =
+      # medium and up), on the files being committed. Until 2026-09-18 bandit
+      # ran ONLY in CI: figcite 70432c5 put a B324 High (hashlib.md5 without
+      # usedforsecurity=False) on master and the first anyone saw of it was a
+      # red default branch blocking an unrelated PR. A finding that a hook can
+      # catch belongs in the hook (CLAUDE.md section 4).
+      - id: bandit-medium-plus
+        name: "bandit, medium+ severity (same as CI); fix it or '# nosec Bxxx - reason'"
+        language: system
+        types: [python]
+        exclude: '^(tests/|mutants/|fuzz_scratch/)'
+        entry: uvx bandit -q -ll
