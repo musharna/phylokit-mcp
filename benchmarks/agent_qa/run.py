@@ -12,12 +12,27 @@ question's data files; the data are NOT in the prompt):
   installed them knows they did, as the mcp arm learns its tools from their
   descriptions. That note is the only difference between the arms' prompts.
 - ``mcp``:  phylokit-mcp (pinned PyPI release via uvx) plus Read, MAFFT on
-  PATH. Read is there because the server takes sequences as a string, not a
-  path, so the data must be read before it can be passed.
+  PATH, and no shell. Read is there because the server takes sequences as a
+  string, not a path, so the data must be read before it can be passed. Its
+  libraries are constrained to the alt arm's (the repo's uv.lock), so both
+  arms run the same piqtree, cogent3 and numpy.
+- ``read``: a control, Read only (no shell, no server, no web). It tests the
+  claim that the inputs are past what can be worked by eye: it can see every
+  byte of the data and nothing to compute with.
+
+One validity rule for every arm (``validity``): the run exited 0 with a
+result; the tools the init event lists are exactly the arm's; a non-bare arm
+made at least one tool call (every question needs its file); and no tool
+input or output touched the key, the benchmark's code, its transcripts, or
+another run's directory (``leak_hits``). Invalid rows are kept and reported,
+never retried or overwritten; no arm is retried.
 
 Each finished run is appended to ``results.jsonl`` with its score; a rerun
 skips (arm, question, rep) triples already there, so an interrupted sweep
-resumes. Raw stream-json transcripts go to ``runs/<arm>/<qid>-<rep>.jsonl``.
+resumes. Raw stream-json transcripts go to ``<artifacts>/runs/<arm>/<qid>-<rep>.jsonl``
+and each run's working directory to ``<artifacts>/tmp``, where ``<artifacts>`` is
+``$PHYLOQA_ARTIFACTS`` or ``~/phylokit-mcp-artifacts/agent_qa``: outside the
+repo, so a shell in a run does not sit next to the key.
 
     uv run python benchmarks/agent_qa/run.py --setup-alt     # once: builds .alt-env
     uv run python benchmarks/agent_qa/run.py --reps 3 --workers 2
@@ -28,6 +43,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -38,6 +54,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from controls import oracle_check
 from score import score
 
 HERE = Path(__file__).resolve().parent
@@ -45,13 +62,50 @@ REPO = HERE.parent.parent
 MODEL = "claude-opus-5-5"
 SERVER = "phylokit-mcp==0.6.0"
 RUN_TIMEOUT_S = 1800
+ARTIFACTS = Path(
+    os.environ.get(
+        "PHYLOQA_ARTIFACTS", Path.home() / "phylokit-mcp-artifacts" / "agent_qa"
+    )
+)
+RUNS = ARTIFACTS / "runs"
 # The alt arm's Python: the repo's locked piqtree/cogent3/numpy, without the
 # server. The worktree's own .venv has phylokit_mcp installed (editable), and a
-# run that imported it would be the mcp arm by another route.
-ALT_ENV = HERE / ".alt-env"
+# run that imported it would be the mcp arm by another route. It lives with
+# the artifacts, outside the repo: in the v2 sweep it sat in this directory,
+# and one traceback printed its path, which names the benchmark's directory.
+ALT_ENV = ARTIFACTS / "alt-env"
+ALT_REQS = ARTIFACTS / "alt-env.requirements.txt"
 # A directory holding only a `mafft` symlink, so putting MAFFT on PATH does not
 # also put whatever else lives beside it (a conda env's python, for one).
-BIN = HERE / ".bin"
+BIN = ARTIFACTS / "bin"
+ARMS = ("bare", "alt", "mcp", "read")
+# The tools each arm's init event must list, exactly (the mcp arm also needs
+# at least one mcp__phylokit__ tool and a connected server).
+INTENDED = {
+    "bare": set(),
+    "alt": {"Bash", "Read", "WebSearch", "WebFetch"},
+    "mcp": {"Read"},
+    "read": {"Read"},
+}
+# A tool input or output matching any of these touched what a run must not:
+# the key and the benchmark's code (by file or directory name), its
+# transcripts and artifacts, the coordinator's job files, or the benchmark's
+# directory in the GitHub repo. Another run's working directory is checked
+# separately (RUN_DIR), since a run's own path is legitimately in its Reads.
+LEAK_PATTERNS = (
+    r"questions\.json",
+    r"build_questions",
+    r"\btruth\.py",
+    r"\bcontrols\.py",
+    r"results\.jsonl",
+    r"agent_qa",
+    r"pilot-v2",
+    r"phylokit_v1_partial",
+    r"\.claude/(?:worktrees|jobs)",
+    r"phylokit-mcp-artifacts/agent_qa/runs",
+    r"(?:github\.com|githubusercontent\.com)/musharna/phylokit-mcp\S*benchmarks",
+)
+RUN_DIR = re.compile(r"phyloqa-[a-z]+-[\w]+")
 SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
 # Every arm gets this in place of Claude Code's own system prompt. That prompt
 # describes tools even when --tools "" removes them all; in the sibling
@@ -74,7 +128,7 @@ def mafft_bin() -> Path:
     target = os.environ.get("MAFFT") or shutil.which("mafft")
     if not target:
         raise SystemExit("MAFFT not found: put it on PATH or set MAFFT=/path/to/mafft")
-    BIN.mkdir(exist_ok=True)
+    BIN.mkdir(parents=True, exist_ok=True)
     link = BIN / "mafft"
     if link.is_symlink() and Path(os.readlink(link)) != Path(target):
         link.unlink()
@@ -92,7 +146,8 @@ def setup_alt() -> None:
         [uv, "export", "--frozen", "--no-dev", "--no-emit-project", "--no-hashes"],
         cwd=REPO, capture_output=True, text=True, check=True,
     ).stdout  # fmt: skip
-    req_file = HERE / ".alt-env.requirements.txt"
+    req_file = ALT_REQS
+    req_file.parent.mkdir(parents=True, exist_ok=True)
     req_file.write_text(reqs)
     subprocess.run([uv, "venv", "--python", sys.executable, str(ALT_ENV)], check=True)
     subprocess.run(
@@ -107,25 +162,84 @@ def setup_alt() -> None:
         ],
         check=True,
     )
-    check_alt()
+    check_alt(json.loads((HERE / "questions.json").read_text())["checked_with"])
 
 
-def check_alt() -> None:
-    """The alt Python has the libraries and NOT the server; both halves checked."""
+_VERSIONS = (
+    "import importlib.metadata as m, json; "
+    "print(json.dumps({p: m.version(p) for p in ('piqtree', 'cogent3', 'numpy')}))"
+)
+
+
+def _expect_engine(
+    where: str, versions: dict[str, str], checked: dict[str, str]
+) -> None:
+    """The key's answerability filters ran on ``checked['piqtree']``; an arm on
+    another piqtree is not answering the questions the key was checked on."""
+    if versions.get("piqtree") != checked["piqtree"]:
+        raise SystemExit(
+            f"{where} has piqtree {versions.get('piqtree')}, but questions.json was "
+            f"checked with {checked['piqtree']}"
+        )
+
+
+def check_alt(checked: dict[str, str]) -> dict[str, str]:
+    """The alt Python has the libraries and NOT the server; both halves checked,
+    and its piqtree is the one the key was checked with. Returns its versions."""
     py = ALT_ENV / "bin" / "python"
     if not py.exists():
         raise SystemExit(f"{ALT_ENV} missing: run with --setup-alt first")
     ok = subprocess.run(
-        [str(py), "-c", "import piqtree, cogent3, numpy; print(piqtree.__version__)"],
-        capture_output=True, text=True, check=False,
-    )  # fmt: skip
+        [str(py), "-c", _VERSIONS], capture_output=True, text=True, check=False
+    )
     if ok.returncode != 0:
         raise SystemExit(f"alt env cannot import piqtree/cogent3: {ok.stderr}")
+    versions = json.loads(ok.stdout)
+    _expect_engine("the alt env", versions, checked)
     leak = subprocess.run(
         [str(py), "-c", "import phylokit_mcp"], capture_output=True, check=False
     )
     if leak.returncode == 0:
         raise SystemExit("alt env can import phylokit_mcp; it must not")
+    return versions
+
+
+def _uvx_server_args() -> list[str]:
+    """uvx arguments for the server, its libraries constrained to the alt env's
+    (the repo's uv.lock), so the two arms differ in the server, not the stack."""
+    reqs = ALT_REQS
+    if not reqs.exists():
+        raise SystemExit(f"{reqs} missing: run with --setup-alt first")
+    return ["--constraints", str(reqs), SERVER]
+
+
+def check_mcp(checked: dict[str, str]) -> dict[str, str]:
+    """The server's own environment, resolved as the mcp arm will start it."""
+    uvx = shutil.which("uvx")
+    if uvx is None:
+        raise SystemExit("uvx not found")
+    args = _uvx_server_args()
+    ok = subprocess.run(
+        [uvx, *args[:-1], "--from", args[-1], "python", "-c", _VERSIONS],
+        capture_output=True, text=True, check=False, timeout=600,
+    )  # fmt: skip
+    if ok.returncode != 0:
+        raise SystemExit(f"cannot resolve {SERVER}: {ok.stderr}")
+    versions = json.loads(ok.stdout.strip().splitlines()[-1])
+    _expect_engine(SERVER, versions, checked)
+    return versions
+
+
+def check_mafft(checked: dict[str, str]) -> None:
+    exe = mafft_bin() / "mafft"
+    out = subprocess.run(
+        [str(exe), "--version"], capture_output=True, text=True, check=False
+    )
+    got = (out.stdout + out.stderr).strip()
+    if checked["mafft"] not in got:
+        raise SystemExit(
+            f"MAFFT is {got!r}, but questions.json was checked with {checked['mafft']!r}"
+        )
 
 
 def arm_setup(arm: str, tmp: Path) -> tuple[list[str], dict[str, str]]:
@@ -133,6 +247,11 @@ def arm_setup(arm: str, tmp: Path) -> tuple[list[str], dict[str, str]]:
     empty = tmp.parent / f"{tmp.name}-no-mcp.json"
     empty.write_text('{"mcpServers": {}}')
     env = dict(os.environ)
+    # A TMPDIR of the run's own, so nothing one run writes to a temp dir is
+    # where another run looks.
+    own_tmp = tmp.parent / "tmp"
+    own_tmp.mkdir(exist_ok=True)
+    env["TMPDIR"] = str(own_tmp)
     if arm == "bare":
         return ["--tools", "", "--strict-mcp-config", "--mcp-config", str(empty)], env
     if arm == "alt":
@@ -157,8 +276,8 @@ def arm_setup(arm: str, tmp: Path) -> tuple[list[str], dict[str, str]]:
                     "mcpServers": {
                         "phylokit": {
                             "command": uvx,
-                            "args": [SERVER],
-                            "env": {"PATH": path},
+                            "args": _uvx_server_args(),
+                            "env": {"PATH": path, "TMPDIR": str(own_tmp)},
                         }
                     }
                 }
@@ -167,6 +286,13 @@ def arm_setup(arm: str, tmp: Path) -> tuple[list[str], dict[str, str]]:
         return [
             "--tools", "Read", "--allowedTools", "mcp__phylokit,Read",
             "--strict-mcp-config", "--mcp-config", str(cfg),
+        ], env  # fmt: skip
+    if arm == "read":
+        env.pop("VIRTUAL_ENV", None)
+        env["PATH"] = SYSTEM_PATH
+        return [
+            "--tools", "Read", "--allowedTools", "Read",
+            "--strict-mcp-config", "--mcp-config", str(empty),
         ], env  # fmt: skip
     raise ValueError(arm)
 
@@ -181,15 +307,87 @@ def _tool_inputs(events: list[dict[str, Any]]) -> list[str]:
     ]
 
 
+def _tool_outputs(events: list[dict[str, Any]]) -> list[str]:
+    return [
+        json.dumps(b.get("content", ""))
+        for e in events
+        if e.get("type") == "user"
+        for b in (e.get("message") or {}).get("content", [])
+        if isinstance(b, dict) and b.get("type") == "tool_result"
+    ]
+
+
+def leak_hits(events: list[dict[str, Any]], own_cwd: str | None) -> list[str]:
+    """Every forbidden string in any tool input or output (LEAK_PATTERNS, plus
+    any run directory that is not this run's own)."""
+    own = Path(own_cwd).parent.name if own_cwd else None
+    hits: list[str] = []
+    for text in _tool_inputs(events) + _tool_outputs(events):
+        for pat in LEAK_PATTERNS:
+            hits += re.findall(pat, text)
+        hits += [m for m in RUN_DIR.findall(text) if m != own]
+    return sorted(set(hits))
+
+
+def validity(arm: str, events: list[dict[str, Any]], rc: object) -> dict[str, Any]:
+    """One rule for every arm; see the module docstring."""
+    init = next(
+        (e for e in events if e.get("type") == "system" and e.get("subtype") == "init"),
+        {},
+    )
+    result = next((e for e in events if e.get("type") == "result"), None)
+    reasons: list[str] = []
+    if rc != 0:
+        reasons.append(f"exit {rc}")
+    if result is None:
+        reasons.append("no result event")
+    elif result.get("is_error") or result.get("subtype") != "success":
+        reasons.append(f"result {result.get('subtype')}")
+    tools = set(init.get("tools") or [])
+    plain = {t for t in tools if not t.startswith("mcp__")}
+    if plain != INTENDED[arm]:
+        reasons.append(f"tools {sorted(plain)} != {sorted(INTENDED[arm])}")
+    servers = {s.get("name"): s.get("status") for s in init.get("mcp_servers") or []}
+    if arm == "mcp":
+        if not any(t.startswith("mcp__phylokit__") for t in tools):
+            reasons.append("no phylokit tools")
+        if servers.get("phylokit") != "connected":
+            reasons.append(f"server {servers.get('phylokit')}")
+    elif any(t.startswith("mcp__") for t in tools) or servers:
+        reasons.append("unexpected MCP server")
+    calls = [
+        b["name"]
+        for e in events
+        if e.get("type") == "assistant"
+        for b in e["message"].get("content", [])
+        if b.get("type") == "tool_use"
+    ]
+    if arm != "bare" and not calls:
+        reasons.append("no tool call")
+    if arm != "mcp" and any("phylokit" in s.lower() for s in _tool_inputs(events)):
+        reasons.append("named phylokit")
+    leaks = leak_hits(events, init.get("cwd"))
+    if leaks:
+        reasons.append("leak")
+    return {"valid": not reasons, "invalid_reasons": reasons, "leaks": leaks}
+
+
+def transcript(arm: str, qid: str, rep: int) -> Path:
+    return RUNS / arm / f"{qid}-{rep}.jsonl"
+
+
 def run_one(arm: str, q: dict[str, Any], rep: int) -> dict[str, Any]:
-    out = HERE / "runs" / arm / f"{q['id']}-{rep}.jsonl"
+    out = transcript(arm, q["id"], rep)
     out.parent.mkdir(parents=True, exist_ok=True)
     question = q["question"] + (ALT_NOTE if arm == "alt" else "")
     prompt = PROMPT.format(question=question, answer_format=q["answer_format"])
     claude = shutil.which("claude")
     if claude is None:
         raise SystemExit("claude not found on PATH")
-    with tempfile.TemporaryDirectory(prefix=f"phyloqa-{arm}-") as d:
+    (ARTIFACTS / "tmp").mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=f"phyloqa-{arm}-", dir=ARTIFACTS / "tmp"
+    ) as d:
         tmp = Path(d) / "cwd"
         tmp.mkdir()
         for name, text in q.get("files", {}).items():
@@ -253,22 +451,46 @@ def run_one(arm: str, q: dict[str, Any], rep: int) -> dict[str, Any]:
         "mentions_phylokit": any("phylokit" in s.lower() for s in inputs),
         "mentions_key": any("questions.json" in s or "agent_qa" in s for s in inputs),
         "cost_usd": result.get("total_cost_usd"),
+        "cwd": init.get("cwd"),
         "reply": reply,
         **score(q, reply),
+        **validity(arm, events, rc),
     }
 
 
 def rescore(results: Path, by_id: dict[str, dict[str, Any]]) -> None:
-    """Score each stored reply again, so a truth or scorer fix reaches runs
-    made before it; prints every verdict that changed."""
+    """Score each stored reply again, and re-judge its validity from its
+    transcript, so a truth, scorer or validity fix reaches runs made before it;
+    prints every verdict or validity that changed. A missing transcript is an
+    error, not a pass."""
     rows = [json.loads(ln) for ln in results.read_text().splitlines()]
     for r in rows:
         new = score(by_id[r["qid"]], r["reply"])
+        path = transcript(r["arm"], r["qid"], r["rep"])
+        if not path.exists():
+            raise SystemExit(
+                f"no transcript for {r['arm']} {r['qid']} rep{r['rep']}: {path}"
+            )
+        events = [
+            json.loads(ln) for ln in path.read_text().splitlines() if ln.startswith("{")
+        ]
+        init = next((e for e in events if e.get("subtype") == "init"), {})
+        new["cwd"] = init.get("cwd")
+        new.update(validity(r["arm"], events, r["exit"]))
         if new["verdict"] != r["verdict"] or new["wrong_id"] != r["wrong_id"]:
             print(f"{r['arm']:4} {r['qid']} rep{r['rep']} {r['verdict']} -> {new['verdict']}"
                   f" ({new['value']!r})")  # fmt: skip
+        if "valid" in r and new["valid"] != r["valid"]:
+            print(f"{r['arm']:4} {r['qid']} rep{r['rep']} valid {r.get('valid')} -> "
+                  f"{new['valid']} {new['invalid_reasons']} {new['leaks']}")  # fmt: skip
         r.update(new)
     results.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    invalid = [r for r in rows if not r["valid"]]
+    print(f"{len(rows)} rows rescored; {len(invalid)} invalid", flush=True)
+    for r in invalid:
+        print(
+            f"  invalid: {r['arm']} {r['qid']} rep{r['rep']} {r['invalid_reasons']} {r['leaks']}"
+        )
 
 
 def main() -> None:
@@ -290,13 +512,26 @@ def main() -> None:
     if a.setup_alt:
         setup_alt()
         return
-    questions = json.loads((HERE / "questions.json").read_text())["questions"]
+    key = json.loads((HERE / "questions.json").read_text())
+    questions = key["questions"]
+    # Positive control before anything is spent: the key's answers score
+    # right and known-wrong ones score wrong.
+    bad = oracle_check(questions)
+    if bad:
+        raise SystemExit("oracle check failed:\n" + "\n".join(bad))
     if a.rescore:
         rescore(Path(a.results), {q["id"]: q for q in questions})
         return
     arms = a.arms.split(",")
+    unknown = set(arms) - set(ARMS)
+    if unknown:
+        raise SystemExit(f"unknown arms {sorted(unknown)}; known: {ARMS}")
     if "alt" in arms:
-        check_alt()
+        print("alt env:", check_alt(key["checked_with"]), flush=True)
+    if "mcp" in arms:
+        print("server env:", check_mcp(key["checked_with"]), flush=True)
+    if {"alt", "mcp"} & set(arms):
+        check_mafft(key["checked_with"])
     if a.only:
         keep = set(a.only.split(","))
         questions = [q for q in questions if q["id"] in keep]

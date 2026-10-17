@@ -1,13 +1,15 @@
-# Figures for the agent benchmark, from results.jsonl directly.
+# Figures for the agent benchmark, from results.jsonl and from summary.tsv,
+# which analyze.py writes (run it first):
 #
+#   uv run python benchmarks/agent_qa/analyze.py
 #   Rscript benchmarks/agent_qa/plot.R [results.jsonl] [outdir]
 #
-# Writes summary.tsv (verdicts, cost and time per setup; verdicts per setup x
-# kind of question) and three figures:
-#   agent_qa.png             right / wrong / declined per setup (the README one)
+# Four figures:
+#   agent_qa.png             right / wrong / declined / invalid per setup (the README one)
+#   agent_qa_accuracy.png    accuracy with 95% intervals: setups and no-LLM baselines
 #   agent_qa_cost_time.png   cost and seconds per answer, every run
-#   agent_qa_by_category.png right / wrong / declined per setup x kind of question
-# Bars count answers, not questions: questions x runs per setup.
+#   agent_qa_by_category.png verdicts per setup x kind of question
+# Verdict bars count answers, not questions: questions x runs per setup.
 # Every number on the figures is computed here from the log; nothing is typed
 # in by hand. Green, red and grey mean right, wrong and declined in every
 # figure; setups are told apart by their axis labels, not by colour.
@@ -21,14 +23,19 @@ outdir <- if (length(args) >= 2) args[2] else "benchmarks/agent_qa"
 source("benchmarks/theme_phylokit.R")
 
 r <- jsonlite::stream_in(file(results_path), verbose = FALSE)
-stopifnot(all(r$verdict %in% names(pal_verdict)))
+stopifnot(all(r$verdict %in% names(pal_verdict)), "valid" %in% names(r))
+# One rule for every setup: an invalid row is drawn as invalid, whatever its
+# reply scored.
+r$verdict[!r$valid] <- "invalid"
 
-arm_labels <- c(
+all_arm_labels <- c(
   bare = "Claude alone",
+  read = "Claude + Read only (control)",
   alt = "Claude + Python, MAFFT, web",
   mcp = "Claude + phylokit-mcp"
 )
-stopifnot(all(r$arm %in% names(arm_labels)))
+stopifnot(all(r$arm %in% names(all_arm_labels)))
+arm_labels <- all_arm_labels[names(all_arm_labels) %in% r$arm]
 r$arm_label <- factor(arm_labels[r$arm], levels = rev(arm_labels))
 r$verdict <- factor(r$verdict, levels = names(pal_verdict))
 
@@ -48,45 +55,16 @@ n_ans <- as.numeric(n_per_arm[1])
 n_q <- length(unique(r$qid))
 n_rep <- length(unique(r$rep))
 
-# Tables first: the figures draw these numbers, and the page quotes them.
-tally <- function(x) {
-  data.frame(
-    right = sum(x$verdict == "right"), wrong = sum(x$verdict == "wrong"),
-    declined = sum(x$verdict == "declined"), no_answer = sum(x$verdict == "no_answer"),
-    wrong_id = sum(x$wrong_id),
-    # Repeats of one question are not independent: also count questions.
-    questions_right_every_run = sum(tapply(x$verdict == "right", x$qid, all))
-  )
+# The tables come from analyze.py; this script only draws. It checks that
+# summary.tsv was written from these same results.
+summary_path <- file.path(outdir, "summary.tsv")
+if (!file.exists(summary_path)) stop("no ", summary_path, ": run analyze.py first")
+s <- read.delim(summary_path, na.strings = "NA")
+sa <- s[s$level == "arm", ]
+stopifnot(setequal(sa$arm, names(arm_labels)))
+for (a in sa$arm) {
+  stopifnot(sa$n[sa$arm == a] == sum(r$arm == a), sa$right[sa$arm == a] == sum(r$arm == a & r$verdict == "right"))
 }
-per_arm <- do.call(rbind, lapply(names(arm_labels), function(a) {
-  x <- r[r$arm == a, ]
-  cbind(
-    level = "arm", arm = a, category = "all", tally(x),
-    cost_usd_mean = round(mean(x$cost_usd), 4),
-    cost_usd_median = round(median(x$cost_usd), 4),
-    cost_usd_total = round(sum(x$cost_usd), 2),
-    seconds_mean = round(mean(x$seconds), 1),
-    seconds_median = round(median(x$seconds), 1),
-    seconds_max = max(x$seconds),
-    tool_calls_mean = round(mean(lengths(x$tool_calls)), 2)
-  )
-}))
-per_cat <- do.call(rbind, lapply(names(arm_labels), function(a) {
-  do.call(rbind, lapply(names(cat_labels), function(k) {
-    cbind(
-      level = "arm_x_category", arm = a, category = k,
-      tally(r[r$arm == a & r$category == k, ]),
-      cost_usd_mean = NA, cost_usd_median = NA, cost_usd_total = NA,
-      seconds_mean = NA, seconds_median = NA, seconds_max = NA, tool_calls_mean = NA
-    )
-  }))
-}))
-# na = "NA", not "": the per-category rows end in empty cost/time fields, and
-# a line ending in tabs is trailing whitespace the pre-commit hook strips,
-# which would drop those columns.
-write.table(rbind(per_arm, per_cat), file.path(outdir, "summary.tsv"),
-  sep = "\t", quote = FALSE, row.names = FALSE, na = "NA"
-)
 
 setup_note <- sprintf("Claude Opus 5.5 in Claude Code, %d questions × %d runs.", n_q, n_rep)
 key_note <- paste0(
@@ -96,7 +74,7 @@ key_note <- paste0(
 # Count labels: white on green and red, dark on the light grey of declined.
 verdict_text <- c(`TRUE` = "grey15", `FALSE` = "white")
 legend_counts <- function(v) {
-  sprintf("%s (%s)", v, vapply(v, function(k) {
+  sprintf("%s (%s)", sub("_", " ", v), vapply(v, function(k) {
     paste(vapply(names(arm_labels), function(a) {
       as.character(sum(r$verdict == k & r$arm == a))
     }, ""), collapse = " / ")
@@ -119,20 +97,48 @@ p1 <- ggplot(counts, aes(x = share, y = arm_label, fill = verdict)) +
   # setup in the order the title names.
   scale_fill_manual(
     values = pal_verdict, labels = legend_counts, drop = TRUE,
-    name = "Answers (alone / Python, MAFFT, web / phylokit-mcp):"
+    name = paste0("Answers (", paste(sub("Claude \\+ |Claude ", "", arm_labels), collapse = " / "), "):")
   ) +
   guides(fill = guide_legend(title.position = "top", title.hjust = 0.5)) +
   scale_x_continuous(labels = scales::percent, expand = c(0, 0)) +
   labs(
     x = sprintf("Share of %d answers per setup", n_ans), y = NULL,
-    title = "Phylogenetics questions: right, wrong or declined",
+    title = "Phylogenetics questions: right, wrong, declined or invalid",
     subtitle = paste0(setup_note, "\n", key_note)
   ) +
   theme_phylokit(base_size = 13) +
   theme(panel.grid.major.y = element_blank(), plot.margin = margin(8, 24, 8, 8))
-ggsave(file.path(outdir, "agent_qa.png"), p1, width = 11, height = 4.2, dpi = 200, bg = "white")
+ggsave(file.path(outdir, "agent_qa.png"), p1, width = 11, height = 1.8 + 0.7 * length(arm_labels), dpi = 200, bg = "white")
 
-# Figure 2: cost and seconds per answer, one point per run, box over them.
+# Figure 2: accuracy with bootstrap 95% intervals over questions, Claude setups
+# (filled) beside the no-LLM baselines (hollow), each on the questions it
+# applies to.
+acc <- s[s$level %in% c("arm", "baseline"), ]
+acc$label <- ifelse(
+  acc$level == "arm", unname(all_arm_labels[acc$arm]),
+  sprintf("Baseline: %s (%s, %d q.)", acc$arm,
+    ifelse(acc$category == "all", "all kinds", unname(cat_labels[acc$category])), acc$questions)
+)
+acc$label <- factor(acc$label, levels = rev(acc$label))
+acc$kind <- ifelse(acc$level == "arm", "Claude setup (all answers)", "No-LLM baseline (one answer per question)")
+p_acc <- ggplot(acc, aes(x = accuracy, y = label)) +
+  geom_errorbar(aes(xmin = accuracy_ci_lo, xmax = accuracy_ci_hi), orientation = "y", width = 0.25, colour = phylokit_ink) +
+  geom_point(aes(shape = kind), size = 3, fill = phylokit_ink, colour = phylokit_ink, stroke = 0.9) +
+  scale_shape_manual(values = c(21, 1), name = NULL) +
+  scale_x_continuous(labels = scales::percent, limits = c(0, 1)) +
+  labs(
+    x = "Share right (invalid rows count as not right). Bars: bootstrap 95% interval over questions",
+    y = NULL, title = "Accuracy of each setup beside what a fixed guess or a shortcut gets",
+    subtitle = paste0(
+      setup_note, "\nBaselines are scored by the same scorer on the same data files; the best constant ",
+      "is chosen with the key, an upper bound."
+    )
+  ) +
+  theme_phylokit(base_size = 12) +
+  theme(panel.grid.major.y = element_blank(), plot.margin = margin(8, 24, 8, 8))
+ggsave(file.path(outdir, "agent_qa_accuracy.png"), p_acc, width = 13.5, height = 1.8 + 0.42 * nrow(acc), dpi = 200, bg = "white")
+
+# Figure 3: cost and seconds per answer, one point per run, box over them.
 long <- rbind(
   data.frame(arm_label = r$arm_label, metric = "Cost per answer (US$, log scale)", value = r$cost_usd),
   data.frame(arm_label = r$arm_label, metric = "Seconds per answer (log scale)", value = r$seconds)
@@ -158,12 +164,12 @@ p2 <- ggplot(long, aes(x = value, y = arm_label)) +
     panel.grid.major.y = element_blank(), strip.text = element_text(hjust = 0, face = "bold"),
     plot.margin = margin(8, 24, 8, 8)
   )
-ggsave(file.path(outdir, "agent_qa_cost_time.png"), p2, width = 12, height = 4.2, dpi = 200, bg = "white")
+ggsave(file.path(outdir, "agent_qa_cost_time.png"), p2, width = 12, height = 1.8 + 0.7 * length(arm_labels), dpi = 200, bg = "white")
 
-# Figure 3: verdicts per setup x kind of question; strips name the counts.
-n_cat <- table(r$category[r$arm == names(arm_labels)[1]])
+# Figure 4: verdicts per setup x kind of question; strips name the counts.
+n_cat <- tapply(r$qid, r$category, function(x) length(unique(x)))
 strip <- setNames(
-  sprintf("%s (%d questions × %d runs)", cat_labels, n_cat[names(cat_labels)] / n_rep, n_rep),
+  sprintf("%s (%d questions × %d runs)", cat_labels, as.integer(n_cat[names(cat_labels)]), n_rep),
   names(cat_labels)
 )
 r$cat_strip <- factor(strip[r$category], levels = strip)
@@ -191,4 +197,4 @@ p3 <- ggplot(cc, aes(x = Freq, y = arm_label, fill = verdict)) +
   )
 ggsave(file.path(outdir, "agent_qa_by_category.png"), p3, width = 14, height = 8, dpi = 200, bg = "white")
 
-print(per_arm)
+print(sa[, c("arm", "n", "right", "wrong", "declined", "invalid", "accuracy", "accuracy_ci_lo", "accuracy_ci_hi")])

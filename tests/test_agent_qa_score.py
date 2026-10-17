@@ -81,6 +81,19 @@ def test_an_integer_is_read_whole_and_never_out_of_a_decimal() -> None:
     assert _v(HOMOLOG, "ANSWER: gap") == "wrong"
 
 
+def test_a_number_inside_a_taxon_name_is_never_read_as_the_answer() -> None:
+    """Taxa are t1..tn, so "t6: 57" names residue 57 of t6, not 6, and
+    "d(t10, t9) = 0.40" is a distance of 0.40, not 10."""
+    assert _v(HOMOLOG, "ANSWER: t6 residue 57") == "right"
+    assert _v(HOMOLOG, "ANSWER: t57") == "wrong"  # a name, not a position
+    assert _v(RF, "ANSWER: t6 vs t9: 6") == "right"
+    assert _v(DIST, "ANSWER: d(t10, t9) = 0.40") == "right"
+    assert _v(DIST, "ANSWER: t3-t9: 0.41 subs/site") == "right"
+    # Positive controls: plain values still read, and a wrong one is wrong.
+    assert _v(HOMOLOG, "ANSWER: 57") == "right"
+    assert _v(DIST, "ANSWER: d(t10, t9) = 0.60") == "wrong"
+
+
 def test_a_taxon_is_matched_by_name_and_a_wrong_one_is_flagged() -> None:
     assert _v(SISTER, "ANSWER: t4") == "right"
     assert _v(SISTER, "ANSWER: T4") == "right"

@@ -41,10 +41,12 @@ from typing import Any
 
 _ANSWER_RE = re.compile(r"^[\s>*_`#-]*answer[*_`]*\s*:\s*(.*?)\s*$", re.IGNORECASE)
 _UNKNOWN = {"UNKNOWN", "UNKNOWN.", "N/A", "NONE"}
-# A whole number that is not part of a decimal: "6", "RF = 6", "6 splits"; not
-# the 0 or the 5 of "0.5".
-_INT = re.compile(r"(?<![\d.])(\d[\d,]*)(?![\d.]|,\d)")
-_NUMBER = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?")
+# A whole number that is not part of a decimal or of a name: "6", "RF = 6",
+# "6 splits"; not the 0 or the 5 of "0.5", and not the 6 of "t6" (taxa are
+# t1..tn, so "residue 338 of t6" and "t6: 338" must both read as 338).
+_INT = re.compile(r"(?<![\w.])(\d[\d,]*)(?![\w.]|,\d)")
+# A number that is not part of a name: the 10 of "d(t10, t9) = 0.44" is not it.
+_NUMBER = re.compile(r"(?<![\w.])[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?")
 
 
 def extract(reply: str) -> str | None:

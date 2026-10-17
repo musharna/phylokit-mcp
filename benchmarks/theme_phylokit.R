@@ -29,8 +29,15 @@ pal_verdict <- c(
   right = "#2E7D5B",
   wrong = "#C0392B",
   declined = "#BDBDBD",
-  no_answer = "#E69F00"
+  no_answer = "#E69F00",
+  # A row that broke the validity rule (benchmarks/agent_qa/run.py): counted
+  # as not right, drawn apart so it is never read as a wrong answer.
+  invalid = "#5B4A8B"
 )
+
+# Accuracy dots: Claude setups filled, no-LLM baselines hollow; one ink colour,
+# so the fill (not a hue) says which is which.
+phylokit_ink <- "grey15"
 
 # Per-run cost/time points: one neutral colour for every setup. Setups are
 # named on the axis; a colour per setup would reuse green and grey, which mean

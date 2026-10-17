@@ -82,6 +82,45 @@ def test_a_workload_whose_output_changed_fails_even_with_equal_counts() -> None:
     assert ratchet.compare(base, base) == []
 
 
+def _update(
+    monkeypatch, tmp_path: Path, base: dict, current: dict, *flags: str
+) -> tuple[int, dict]:
+    """ratchet.main with the measurement and the baseline file swapped for
+    these rows; returns the exit code and the baseline file afterwards."""
+    path = tmp_path / "baseline.json"
+    path.write_text(json.dumps(base))
+    monkeypatch.setattr(ratchet, "BASELINE", path)
+    monkeypatch.setattr(ratchet, "WORKLOADS", tuple(current))
+    monkeypatch.setattr(ratchet, "measure", lambda names=None: current)
+    code = ratchet.main(["--update", *flags])
+    return code, json.loads(path.read_text())
+
+
+def test_update_refuses_a_rise_without_allow_increase_and_takes_a_drop(
+    monkeypatch, tmp_path: Path
+) -> None:
+    base = {"a": _row({"x.py:f": 5})}
+    more = {"a": _row({"x.py:f": 6})}
+    code, after = _update(monkeypatch, tmp_path, base, more)
+    assert code == 1 and after == base  # refused, file untouched
+    code, after = _update(monkeypatch, tmp_path, base, more, "--allow-increase")
+    assert code == 0 and after == more  # an explicit rise is written
+    fewer = {"a": _row({"x.py:f": 4})}
+    code, after = _update(monkeypatch, tmp_path, base, fewer)
+    assert code == 0 and after == fewer  # positive control: a drop locks in
+
+
+def test_update_refuses_a_changed_output_even_when_the_counts_are_equal(
+    monkeypatch, tmp_path: Path
+) -> None:
+    base = {"a": _row({"x.py:f": 5}, witness={"sha256": "aaa"})}
+    other = {"a": _row({"x.py:f": 5}, witness={"sha256": "bbb"})}
+    code, after = _update(monkeypatch, tmp_path, base, other)
+    assert code == 1 and after == base
+    code, after = _update(monkeypatch, tmp_path, base, base)
+    assert code == 0 and after == base  # positive control: same output passes
+
+
 def test_an_unknown_workload_is_refused_not_run_as_a_default() -> None:
     bad = subprocess.run(
         [sys.executable, str(PERF / "ratchet.py"), "--child", "infer_tre"],
