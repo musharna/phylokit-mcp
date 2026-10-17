@@ -6,6 +6,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Agent benchmark** (`benchmarks/agent_qa/`): 46 phylogenetics questions
+  (sister taxon, Robinson-Foulds distance, homologous residue after
+  alignment, lowest-BIC model, JC69 distance, parsimony-informative sites),
+  asked to Claude with no tools, with Python + MAFFT + web, and with this
+  server. The answer key comes from simulators written without the server or
+  its libraries; deterministic scorer with per-category tolerance rules,
+  tested in `tests/test_agent_qa_score.py`. Results pending the full sweep.
+- **Work-count perf ratchet** (`benchmarks/perf/`): calls into the package,
+  calls into piqtree and MAFFT launches per tool on fixed inputs, compared
+  exactly with `baseline.json` in CI and in `tests/test_perf_ratchet.py`. A
+  rise fails; a drop fails until locked in with `--update`; raising the
+  baseline needs `--allow-increase`. Identical on Python 3.12, 3.13 and 3.14.
+
 ## [0.6.0] — 2026-09-26
 
 ### Fixed
