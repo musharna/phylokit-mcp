@@ -1,0 +1,83 @@
+baseline	category	qid	value	verdict
+best constant	sister_taxon	q01	t21	right
+best constant	sister_taxon	q02	t21	wrong
+best constant	sister_taxon	q03	t21	wrong
+best constant	sister_taxon	q04	t21	wrong
+best constant	sister_taxon	q05	t21	wrong
+best constant	sister_taxon	q06	t21	wrong
+best constant	rf_distance	q07	22	wrong
+best constant	rf_distance	q08	22	wrong
+best constant	rf_distance	q09	22	wrong
+best constant	rf_distance	q10	22	right
+best constant	rf_distance	q11	22	right
+best constant	rf_distance	q12	22	wrong
+best constant	homologous_position	q13	338	right
+best constant	homologous_position	q14	338	wrong
+best constant	homologous_position	q15	338	wrong
+best constant	homologous_position	q16	338	wrong
+best constant	homologous_position	q17	338	wrong
+best constant	homologous_position	q18	338	wrong
+best constant	model_selection	q19	JC69	right
+best constant	model_selection	q20	JC69	right
+best constant	model_selection	q21	JC69	wrong
+best constant	model_selection	q22	JC69	wrong
+best constant	model_selection	q23	JC69	wrong
+best constant	model_selection	q24	JC69	wrong
+best constant	model_selection	q25	JC69	wrong
+best constant	model_selection	q26	JC69	wrong
+best constant	pairwise_distance	q27	0.090	wrong
+best constant	pairwise_distance	q28	0.090	right
+best constant	pairwise_distance	q29	0.090	wrong
+best constant	pairwise_distance	q30	0.090	wrong
+best constant	pairwise_distance	q31	0.090	right
+best constant	pairwise_distance	q32	0.090	right
+best constant	informative_sites	q33	301	right
+best constant	informative_sites	q34	301	wrong
+best constant	informative_sites	q35	301	wrong
+best constant	informative_sites	q36	301	wrong
+best constant	informative_sites	q37	301	wrong
+best constant	informative_sites	q38	301	wrong
+nearest taxon by JC distance	sister_taxon	q01	t1	wrong
+nearest taxon by JC distance	sister_taxon	q02	t19	wrong
+nearest taxon by JC distance	sister_taxon	q03	t24	right
+nearest taxon by JC distance	sister_taxon	q04	t18	right
+nearest taxon by JC distance	sister_taxon	q05	t9	right
+nearest taxon by JC distance	sister_taxon	q06	t2	right
+neighbour-joining cherry partner	sister_taxon	q01	t21	right
+neighbour-joining cherry partner	sister_taxon	q02	t13	right
+neighbour-joining cherry partner	sister_taxon	q03	t24	right
+neighbour-joining cherry partner	sister_taxon	q04	t18	right
+neighbour-joining cherry partner	sister_taxon	q05	t9	right
+neighbour-joining cherry partner	sister_taxon	q06	t7	wrong
+same residue number	homologous_position	q13	332	wrong
+same residue number	homologous_position	q14	357	wrong
+same residue number	homologous_position	q15	410	wrong
+same residue number	homologous_position	q16	349	wrong
+same residue number	homologous_position	q17	598	wrong
+same residue number	homologous_position	q18	193	wrong
+same relative position	homologous_position	q13	331	wrong
+same relative position	homologous_position	q14	365	wrong
+same relative position	homologous_position	q15	411	wrong
+same relative position	homologous_position	q16	332	wrong
+same relative position	homologous_position	q17	610	wrong
+same relative position	homologous_position	q18	178	wrong
+uncorrected p-distance	pairwise_distance	q27	0.3290	wrong
+uncorrected p-distance	pairwise_distance	q28	0.0670	right
+uncorrected p-distance	pairwise_distance	q29	0.4550	wrong
+uncorrected p-distance	pairwise_distance	q30	0.4920	wrong
+uncorrected p-distance	pairwise_distance	q31	0.1110	right
+uncorrected p-distance	pairwise_distance	q32	0.0960	right
+variable sites	informative_sites	q33	562	wrong
+variable sites	informative_sites	q34	628	wrong
+variable sites	informative_sites	q35	582	wrong
+variable sites	informative_sites	q36	620	wrong
+variable sites	informative_sites	q37	711	wrong
+variable sites	informative_sites	q38	695	wrong
+composition test + transition share	model_selection	q19	F81	wrong
+composition test + transition share	model_selection	q20	JC69	right
+composition test + transition share	model_selection	q21	HKY85	wrong
+composition test + transition share	model_selection	q22	HKY85	wrong
+composition test + transition share	model_selection	q23	F81	right
+composition test + transition share	model_selection	q24	F81	right
+composition test + transition share	model_selection	q25	HKY85	right
+composition test + transition share	model_selection	q26	HKY85	right

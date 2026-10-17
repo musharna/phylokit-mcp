@@ -29,10 +29,14 @@ never retried or overwritten; no arm is retried.
 
 Each finished run is appended to ``results.jsonl`` with its score; a rerun
 skips (arm, question, rep) triples already there, so an interrupted sweep
-resumes. Raw stream-json transcripts go to ``<artifacts>/runs/<arm>/<qid>-<rep>.jsonl``
-and each run's working directory to ``<artifacts>/tmp``, where ``<artifacts>`` is
-``$PHYLOQA_ARTIFACTS`` or ``~/phylokit-mcp-artifacts/agent_qa``: outside the
-repo, so a shell in a run does not sit next to the key.
+resumes. Raw stream-json transcripts go to ``<artifacts>/runs/<arm>/<qid>-<rep>.jsonl``,
+where ``<artifacts>`` is ``$PHYLOQA_ARTIFACTS`` or
+``~/phylokit-mcp-artifacts/agent_qa``: outside the repo, so a shell in a run
+does not sit next to the key. Each run's working directory is a fresh
+``phyloqa-<arm>-*`` directory in the system temp dir, whose path must name
+nothing the leak scan looks for (``check_run_dir``): a run reads its own
+files by absolute path, and a path naming the server or the benchmark would
+mark every run invalid.
 
     uv run python benchmarks/agent_qa/run.py --setup-alt     # once: builds .alt-env
     uv run python benchmarks/agent_qa/run.py --reps 3 --workers 2
@@ -372,6 +376,23 @@ def validity(arm: str, events: list[dict[str, Any]], rc: object) -> dict[str, An
     return {"valid": not reasons, "invalid_reasons": reasons, "leaks": leaks}
 
 
+def _home_as_tilde(path: str | None) -> str | None:
+    """The stored copy of a path, with the home directory written as ~ (the
+    results are committed; the leak scan reads the transcript, not this)."""
+    home = str(Path.home())
+    return "~" + path[len(home) :] if path and path.startswith(home + "/") else path
+
+
+def check_run_dir(path: str) -> None:
+    """A run's own directory must not itself name what the leak scan and the
+    arm rule look for; fails loud before a run is spent."""
+    bad = [p for p in LEAK_PATTERNS if re.search(p, path)]
+    if "phylokit" in path.lower():
+        bad.append("phylokit")
+    if bad:
+        raise SystemExit(f"run directory {path} names {bad}; set TMPDIR elsewhere")
+
+
 def transcript(arm: str, qid: str, rep: int) -> Path:
     return RUNS / arm / f"{qid}-{rep}.jsonl"
 
@@ -384,10 +405,8 @@ def run_one(arm: str, q: dict[str, Any], rep: int) -> dict[str, Any]:
     claude = shutil.which("claude")
     if claude is None:
         raise SystemExit("claude not found on PATH")
-    (ARTIFACTS / "tmp").mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix=f"phyloqa-{arm}-", dir=ARTIFACTS / "tmp"
-    ) as d:
+    with tempfile.TemporaryDirectory(prefix=f"phyloqa-{arm}-") as d:
+        check_run_dir(d)
         tmp = Path(d) / "cwd"
         tmp.mkdir()
         for name, text in q.get("files", {}).items():
@@ -451,7 +470,7 @@ def run_one(arm: str, q: dict[str, Any], rep: int) -> dict[str, Any]:
         "mentions_phylokit": any("phylokit" in s.lower() for s in inputs),
         "mentions_key": any("questions.json" in s or "agent_qa" in s for s in inputs),
         "cost_usd": result.get("total_cost_usd"),
-        "cwd": init.get("cwd"),
+        "cwd": _home_as_tilde(init.get("cwd")),
         "reply": reply,
         **score(q, reply),
         **validity(arm, events, rc),
@@ -475,7 +494,7 @@ def rescore(results: Path, by_id: dict[str, dict[str, Any]]) -> None:
             json.loads(ln) for ln in path.read_text().splitlines() if ln.startswith("{")
         ]
         init = next((e for e in events if e.get("subtype") == "init"), {})
-        new["cwd"] = init.get("cwd")
+        new["cwd"] = _home_as_tilde(init.get("cwd"))
         new.update(validity(r["arm"], events, r["exit"]))
         if new["verdict"] != r["verdict"] or new["wrong_id"] != r["wrong_id"]:
             print(f"{r['arm']:4} {r['qid']} rep{r['rep']} {r['verdict']} -> {new['verdict']}"

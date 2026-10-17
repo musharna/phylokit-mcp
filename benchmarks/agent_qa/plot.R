@@ -2,7 +2,7 @@
 # which analyze.py writes (run it first):
 #
 #   uv run python benchmarks/agent_qa/analyze.py
-#   Rscript benchmarks/agent_qa/plot.R [results.jsonl] [outdir]
+#   Rscript benchmarks/agent_qa/plot.R [results.jsonl[,results_read.jsonl]] [outdir]
 #
 # Four figures:
 #   agent_qa.png             right / wrong / declined / invalid per setup (the README one)
@@ -22,7 +22,12 @@ results_path <- if (length(args) >= 1) args[1] else "benchmarks/agent_qa/results
 outdir <- if (length(args) >= 2) args[2] else "benchmarks/agent_qa"
 source("benchmarks/theme_phylokit.R")
 
-r <- jsonlite::stream_in(file(results_path), verbose = FALSE)
+# One results file or several, comma-separated, as analyze.py takes them.
+r <- do.call(rbind, lapply(strsplit(results_path, ",")[[1]], function(p) {
+  x <- jsonlite::stream_in(file(p), verbose = FALSE)
+  x[, c("arm", "qid", "category", "rep", "verdict", "valid", "wrong_id", "cost_usd", "seconds", "tool_calls")]
+}))
+stopifnot(!anyDuplicated(r[, c("arm", "qid", "rep")]))
 stopifnot(all(r$verdict %in% names(pal_verdict)), "valid" %in% names(r))
 # One rule for every setup: an invalid row is drawn as invalid, whatever its
 # reply scored.
@@ -187,7 +192,7 @@ p3 <- ggplot(cc, aes(x = Freq, y = arm_label, fill = verdict)) +
   scale_fill_manual(values = pal_verdict, name = NULL, drop = TRUE) +
   scale_x_continuous(expand = c(0, 0)) +
   labs(
-    x = "Answers", y = NULL, title = "Right, wrong or declined, by kind of question",
+    x = "Answers", y = NULL, title = "Right, wrong, declined or invalid, by kind of question",
     subtitle = setup_note
   ) +
   theme_phylokit(base_size = 12) +

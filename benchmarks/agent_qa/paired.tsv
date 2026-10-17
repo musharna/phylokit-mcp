@@ -1,0 +1,2 @@
+a	b	questions	a_right_every_run	b_right_every_run	both	a_only	b_only	neither	sign_test_p	seconds_ratio_b_over_a	seconds_ratio_ci_lo	seconds_ratio_ci_hi	questions_b_slower	seconds_sign_test_p	cost_ratio_b_over_a	cost_ratio_ci_lo	cost_ratio_ci_hi
+alt	mcp	38	37	36	35	2	1	0	1	6.037	4.317	8.358	36	5.399e-09	14.39	9.899	20.42

@@ -1,8 +1,10 @@
 """Tables and statistics for the agent benchmark, from results.jsonl.
 
-    uv run python benchmarks/agent_qa/analyze.py [results.jsonl] [outdir]
+    uv run python benchmarks/agent_qa/analyze.py [results.jsonl[,results_read.jsonl]] [outdir]
 
-Writes, next to the results:
+The first argument is one results file or several, comma-separated (the read
+control has its own); a run (arm, question, rep) found twice is an error.
+Writes, next to the first results file:
 
 - ``summary.tsv``: per arm (and arm x kind of question) the verdict counts,
   invalid rows, accuracy, questions right in every run, cost, time and tool
@@ -276,9 +278,12 @@ def write_tsv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def main(argv: list[str]) -> None:
-    results = Path(argv[0]) if argv else HERE / "results.jsonl"
-    outdir = Path(argv[1]) if len(argv) > 1 else results.parent
-    rows = [json.loads(ln) for ln in results.read_text().splitlines()]
+    paths = [Path(p) for p in argv[0].split(",")] if argv else [HERE / "results.jsonl"]
+    outdir = Path(argv[1]) if len(argv) > 1 else paths[0].parent
+    rows = [json.loads(ln) for p in paths for ln in p.read_text().splitlines()]
+    keys = [(r["arm"], r["qid"], r["rep"]) for r in rows]
+    if len(set(keys)) != len(keys):
+        raise SystemExit(f"a run appears twice across {[str(p) for p in paths]}")
     questions = json.loads((HERE / "questions.json").read_text())["questions"]
     rng = np.random.default_rng(SEED)
     base = baselines(questions)

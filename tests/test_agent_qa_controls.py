@@ -206,6 +206,19 @@ def test_a_leak_in_a_tool_input_or_output_invalidates_but_the_runs_own_dir_does_
     assert home["leaks"] == []
 
 
+def test_a_run_directory_that_names_the_benchmark_is_refused_before_the_run() -> None:
+    """The 2026-10-17 read-arm restart put run directories under
+    ~/phylokit-mcp-artifacts/agent_qa/tmp; every Read path then named both,
+    and the first two runs were invalid. The check refuses such a path."""
+    import pytest
+
+    for bad in ("/home/u/phylokit-mcp-artifacts/agent_qa/tmp/phyloqa-read-x",
+                "/home/u/phylokit/tmp/phyloqa-read-x"):  # fmt: skip
+        with pytest.raises(SystemExit, match="names"):
+            run.check_run_dir(bad)
+    run.check_run_dir("/tmp/phyloqa-read-abc123")  # positive control
+
+
 # --- statistics ------------------------------------------------------------------
 
 
