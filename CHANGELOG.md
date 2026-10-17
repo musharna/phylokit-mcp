@@ -8,11 +8,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **Agent benchmark** (`benchmarks/agent_qa/`): 46 phylogenetics questions
+- **Agent benchmark** (`benchmarks/agent_qa/`): 38 phylogenetics questions
   (sister taxon, Robinson-Foulds distance, homologous residue after
-  alignment, lowest-BIC model, JC69 distance, parsimony-informative sites),
-  asked to Claude with no tools, with Python + MAFFT + web, and with this
-  server. The answer key comes from simulators written without the server or
+  alignment, lowest-BIC model, JC69 distance, parsimony-informative sites) on
+  inputs too large to work by eye (16-24 taxa, 800-1200 sites, 30-50-tip
+  trees), given as files only. They are asked to Claude with no tools, with
+  Python (piqtree, cogent3) + MAFFT + web, and with this server. The answer key comes from simulators written without the server or
   its libraries; deterministic scorer with per-category tolerance rules,
   tested in `tests/test_agent_qa_score.py`. Results pending the full sweep.
 - **Work-count perf ratchet** (`benchmarks/perf/`): calls into the package,

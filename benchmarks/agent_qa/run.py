@@ -1,14 +1,19 @@
 """Ask every question to Claude Code under each arm, and score the replies.
 
-Arms (same model, same prompt, same system prompt, isolated: no user settings,
-hooks or other MCP servers, a fresh empty working directory per run holding
-only that question's data files):
+Arms (same model, same system prompt, isolated: no user settings, hooks or
+other MCP servers, a fresh empty working directory per run holding only that
+question's data files; the data are NOT in the prompt):
 
-- ``bare``: no tools at all.
+- ``bare``: no tools at all. It cannot open the data file, so declining is the
+  right answer for it; it is the floor, not a competitor.
 - ``alt``:  what a user has without this server: Bash, Read, WebSearch and
   WebFetch, with a Python that has piqtree, cogent3 and numpy (but not
-  phylokit-mcp) and MAFFT on PATH.
-- ``mcp``:  phylokit-mcp (pinned PyPI release via uvx) only, MAFFT on PATH.
+  phylokit-mcp) and MAFFT on PATH. Its prompt says so (ALT_NOTE): a user who
+  installed them knows they did, as the mcp arm learns its tools from their
+  descriptions. That note is the only difference between the arms' prompts.
+- ``mcp``:  phylokit-mcp (pinned PyPI release via uvx) plus Read, MAFFT on
+  PATH. Read is there because the server takes sequences as a string, not a
+  path, so the data must be read before it can be passed.
 
 Each finished run is appended to ``results.jsonl`` with its score; a rerun
 skips (arm, question, rep) triples already there, so an interrupted sweep
@@ -39,7 +44,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 MODEL = "claude-opus-5-5"
 SERVER = "phylokit-mcp==0.6.0"
-RUN_TIMEOUT_S = 900
+RUN_TIMEOUT_S = 1800
 # The alt arm's Python: the repo's locked piqtree/cogent3/numpy, without the
 # server. The worktree's own .venv has phylokit_mcp installed (editable), and a
 # run that imported it would be the mcp arm by another route.
@@ -53,6 +58,10 @@ SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
 # plant-genomics-mcp benchmark's pilot the no-tools arm wrote fake tool calls
 # as text instead of answering. Tools still reach the model through the API.
 SYSTEM = "You are a helpful assistant. Answer the user's question."
+ALT_NOTE = (
+    "\n\nYour shell's python3 has piqtree (the IQ-TREE 3 bindings), cogent3 and "
+    "numpy installed, and MAFFT is on PATH."
+)
 PROMPT = (
     "{question}\n\nGive the answer as {answer_format}. Keep your reply short, and end it "
     "with one line of the form\nANSWER: <answer>\nIf you cannot determine the answer, end "
@@ -156,7 +165,7 @@ def arm_setup(arm: str, tmp: Path) -> tuple[list[str], dict[str, str]]:
             )
         )
         return [
-            "--tools", "", "--allowedTools", "mcp__phylokit",
+            "--tools", "Read", "--allowedTools", "mcp__phylokit,Read",
             "--strict-mcp-config", "--mcp-config", str(cfg),
         ], env  # fmt: skip
     raise ValueError(arm)
@@ -175,7 +184,8 @@ def _tool_inputs(events: list[dict[str, Any]]) -> list[str]:
 def run_one(arm: str, q: dict[str, Any], rep: int) -> dict[str, Any]:
     out = HERE / "runs" / arm / f"{q['id']}-{rep}.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
-    prompt = PROMPT.format(question=q["question"], answer_format=q["answer_format"])
+    question = q["question"] + (ALT_NOTE if arm == "alt" else "")
+    prompt = PROMPT.format(question=question, answer_format=q["answer_format"])
     claude = shutil.which("claude")
     if claude is None:
         raise SystemExit("claude not found on PATH")

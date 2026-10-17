@@ -207,34 +207,42 @@ def _questions() -> list[dict]:
     return json.loads((BENCH / "questions.json").read_text())["questions"]
 
 
-def test_the_frozen_key_matches_the_data_shown_in_each_question() -> None:
-    """Recompute what can be recomputed from the question text alone."""
+def test_the_frozen_key_matches_the_data_files_and_the_prompt_holds_no_data() -> None:
+    """Recompute what can be recomputed from the data files alone, and check
+    every question names its file without inlining it. Version 1 inlined small
+    data and the no-tools arm solved it by eye."""
     checked = {"rf_distance": 0, "informative_sites": 0, "homologous_position": 0}
     for q in _questions():
+        for name, text in q["files"].items():
+            assert f"`{name}`" in q["question"], q["id"]
+            assert text.splitlines()[1] not in q["question"], q["id"]
+            assert len(text) > 800, q["id"]
         if q["category"] == "rf_distance":
             nw_a, nw_b = q["files"]["trees.nwk"].split()
-            assert f"Tree A: {nw_a}\nTree B: {nw_b}" in q["question"]
             got = T.robinson_foulds(
                 T.splits(T.parse_newick(nw_a)), T.splits(T.parse_newick(nw_b))
             )
             assert got == q["truth"]["rf"], q["id"]
         elif q["category"] == "informative_sites":
             text = q["files"]["alignment.fasta"]
-            assert text in q["question"]
             seqs = {
                 block.split("\n", 1)[0]: block.split("\n", 1)[1].replace("\n", "")
                 for block in text.strip(">\n").split("\n>")
             }
             assert T.parsimony_informative(seqs) == q["truth"]["count"], q["id"]
         elif q["category"] == "homologous_position":
-            assert q["files"]["sequences.fasta"] in q["question"]
+            seqs = {
+                b.split("\n", 1)[0]: b.split("\n", 1)[1].replace("\n", "")
+                for b in q["files"]["sequences.fasta"].strip(">\n").split("\n>")
+            }
+            assert len(seqs) == 10 and len({len(v) for v in seqs.values()}) > 1
         else:
             continue
         checked[q["category"]] += 1
     assert checked == {
-        "rf_distance": 8,
+        "rf_distance": 6,
         "informative_sites": 6,
-        "homologous_position": 8,
+        "homologous_position": 6,
     }
 
 
@@ -257,13 +265,13 @@ def test_the_key_has_every_category_and_unique_ids() -> None:
     counts: dict[str, int] = {}
     for q in qs:
         counts[q["category"]] = counts.get(q["category"], 0) + 1
-    assert len({q["id"] for q in qs}) == len(qs) == 46
+    assert len({q["id"] for q in qs}) == len(qs) == 38
     assert counts == {
-        "sister_taxon": 8,
-        "rf_distance": 8,
-        "homologous_position": 8,
+        "sister_taxon": 6,
+        "rf_distance": 6,
+        "homologous_position": 6,
         "model_selection": 8,
-        "pairwise_distance": 8,
+        "pairwise_distance": 6,
         "informative_sites": 6,
     }
     # Every stored truth scores right against itself, and a nearby wrong value
