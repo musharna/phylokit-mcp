@@ -1,0 +1,49 @@
+level	arm	category	n	right	wrong	declined	no_answer	invalid	wrong_id	accuracy	accuracy_ci_lo	accuracy_ci_hi	accuracy_valid_only	questions	questions_right_every_run	questions_right_every_run_ci_lo	questions_right_every_run_ci_hi	cost_usd_median	cost_usd_median_ci_lo	cost_usd_median_ci_hi	cost_usd_total	seconds_median	seconds_median_ci_lo	seconds_median_ci_hi	seconds_max	tool_calls_mean
+arm	bare	all	114	0	0	114	0	0	0	0	0	0	0	38	0	0	0	0.01175	0.01142	0.01228	1.391	5.4	5.3	5.6	10.9	0
+arm_x_subset	bare	needs_compute	60	0	0	60	0	0	0	0	0	0	NA	20	0	0	0	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	bare	sister_taxon	18	0	0	18	0	0	0	NA	NA	NA	NA	6	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	bare	rf_distance	18	0	0	18	0	0	0	NA	NA	NA	NA	6	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	bare	homologous_position	18	0	0	18	0	0	0	NA	NA	NA	NA	6	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	bare	model_selection	24	0	0	24	0	0	0	NA	NA	NA	NA	8	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	bare	pairwise_distance	18	0	0	18	0	0	0	NA	NA	NA	NA	6	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	bare	informative_sites	18	0	0	18	0	0	0	NA	NA	NA	NA	6	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm	read	all	114	76	24	12	0	2	19	0.6667	0.5351	0.7982	0.6786	38	21	15	27	0.1796	0.1518	0.232	30.55	34.5	25.9	47.9	1688	1
+arm_x_subset	read	needs_compute	60	25	21	12	0	2	19	0.4167	0.2333	0.6	NA	20	6	2	10	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	read	sister_taxon	18	11	5	0	0	2	6	NA	NA	NA	NA	6	3	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	read	rf_distance	18	17	1	0	0	0	0	NA	NA	NA	NA	6	5	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	read	homologous_position	18	16	2	0	0	0	0	NA	NA	NA	NA	6	4	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	read	model_selection	24	11	13	0	0	0	13	NA	NA	NA	NA	8	3	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	read	pairwise_distance	18	18	0	0	0	0	0	NA	NA	NA	NA	6	6	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	read	informative_sites	18	3	3	12	0	0	0	NA	NA	NA	NA	6	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm	alt	all	114	113	0	0	0	1	0	0.9912	0.9737	1	1	38	37	35	38	0.02865	0.02322	0.03305	3.412	13.3	12.4	16.9	42.9	1.684
+arm_x_subset	alt	needs_compute	60	60	0	0	0	0	0	1	1	1	NA	20	20	20	20	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	alt	sister_taxon	18	18	0	0	0	0	0	NA	NA	NA	NA	6	6	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	alt	rf_distance	18	17	0	0	0	1	0	NA	NA	NA	NA	6	5	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	alt	homologous_position	18	18	0	0	0	0	0	NA	NA	NA	NA	6	6	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	alt	model_selection	24	24	0	0	0	0	0	NA	NA	NA	NA	8	8	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	alt	pairwise_distance	18	18	0	0	0	0	0	NA	NA	NA	NA	6	6	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	alt	informative_sites	18	18	0	0	0	0	0	NA	NA	NA	NA	6	6	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm	mcp	all	114	110	4	0	0	0	0	0.9649	0.9035	1	0.9649	38	36	33	38	0.5515	0.3447	0.6539	62.51	112.2	69.45	118.2	662.8	2.281
+arm_x_subset	mcp	needs_compute	60	60	0	0	0	0	0	1	1	1	NA	20	20	20	20	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	mcp	sister_taxon	18	18	0	0	0	0	0	NA	NA	NA	NA	6	6	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	mcp	rf_distance	18	18	0	0	0	0	0	NA	NA	NA	NA	6	6	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	mcp	homologous_position	18	14	4	0	0	0	0	NA	NA	NA	NA	6	4	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	mcp	model_selection	24	24	0	0	0	0	0	NA	NA	NA	NA	8	8	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	mcp	pairwise_distance	18	18	0	0	0	0	0	NA	NA	NA	NA	6	6	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+arm_x_category	mcp	informative_sites	18	18	0	0	0	0	0	NA	NA	NA	NA	6	6	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline	best constant	all	38	10	28	0	0	0	0	0.2632	0.1316	0.4211	NA	38	10	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline_x_category	best constant	sister_taxon	6	1	5	0	0	0	0	NA	NA	NA	NA	6	1	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline_x_category	best constant	rf_distance	6	2	4	0	0	0	0	NA	NA	NA	NA	6	2	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline_x_category	best constant	homologous_position	6	1	5	0	0	0	0	NA	NA	NA	NA	6	1	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline_x_category	best constant	model_selection	8	2	6	0	0	0	0	NA	NA	NA	NA	8	2	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline_x_category	best constant	pairwise_distance	6	3	3	0	0	0	0	NA	NA	NA	NA	6	3	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline_x_category	best constant	informative_sites	6	1	5	0	0	0	0	NA	NA	NA	NA	6	1	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline	nearest taxon by JC distance	sister_taxon	6	4	2	0	0	0	0	0.6667	0.3333	1	NA	6	4	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline	neighbour-joining cherry partner	sister_taxon	6	5	1	0	0	0	0	0.8333	0.5	1	NA	6	5	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline	same residue number	homologous_position	6	0	6	0	0	0	0	0	0	0	NA	6	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline	same relative position	homologous_position	6	0	6	0	0	0	0	0	0	0	NA	6	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline	flanking-motif match (+-6, no alignment)	homologous_position	6	5	1	0	0	0	0	0.8333	0.5	1	NA	6	5	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline	RF on the bracketed groups as written	rf_distance	6	0	6	0	0	0	0	0	0	0	NA	6	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline	uncorrected p-distance	pairwise_distance	6	3	3	0	0	0	0	0.5	0.1667	0.8333	NA	6	3	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline	variable sites	informative_sites	6	0	6	0	0	0	0	0	0	0	NA	6	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA
+baseline	composition test + transition share	model_selection	8	5	3	0	0	0	0	0.625	0.25	1	NA	8	5	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA

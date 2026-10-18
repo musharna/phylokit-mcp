@@ -57,6 +57,14 @@ jobs:
       - name: Types
         run: uv run mypy src
 
+      # Work counts per tool on fixed inputs, compared exactly with
+      # benchmarks/perf/baseline.json: calls into the package, calls into
+      # piqtree, MAFFT launches. Counts, not seconds, so there is no headroom
+      # for a regression to hide in. Its own step so the per-tool table is in
+      # the log; tests/test_perf_ratchet.py runs the same gate under pytest.
+      - name: Perf ratchet (work counts)
+        run: uv run python benchmarks/perf/ratchet.py
+
       - name: Test
         # No mocked engine anywhere in the suite, so this exercises real
         # IQ-TREE and real MAFFT. Bootstrap replicates dominate the runtime.

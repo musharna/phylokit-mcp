@@ -1,0 +1,227 @@
+{
+ "infer_tree": {
+  "witness": {
+   "clades": [
+    "c|d|e",
+    "d|e"
+   ],
+   "replicates": 20
+  },
+  "python_calls": {
+   "alignment.py:_accepts": 4,
+   "alignment.py:duplicate_groups": 1,
+   "alignment.py:duplicate_groups.<locals>.<genexpr>": 1,
+   "alignment.py:parse_fasta": 1,
+   "alignment.py:parsimony_informative": 2,
+   "alignment.py:parsimony_informative.<locals>.<genexpr>": 720,
+   "alignment.py:require_phylogenetic_signal": 1,
+   "alignment.py:summarise": 1,
+   "alignment.py:summarise.<locals>.<genexpr>": 12,
+   "alignment.py:to_cogent3": 21,
+   "alignment.py:unrecognised_characters": 1,
+   "alignment.py:validate": 1,
+   "bootstrap.py:BootstrapResult.as_dict": 1,
+   "bootstrap.py:BootstrapResult.fraction_resolved": 2,
+   "bootstrap.py:CladeSupport.as_dict": 4,
+   "bootstrap.py:bootstrap_support": 1,
+   "bootstrap.py:bootstrap_support.<locals>.<genexpr>": 6,
+   "bootstrap.py:bootstrap_support.<locals>.<lambda>": 4,
+   "bootstrap.py:resample_columns": 20,
+   "bootstrap.py:validate_replicates": 2,
+   "diagnostics.py:collect": 1,
+   "diagnostics.py:conflicting_support": 1,
+   "diagnostics.py:duplicate_sequences": 1,
+   "diagnostics.py:gappy_alignment": 1,
+   "diagnostics.py:poorly_resolved": 1,
+   "diagnostics.py:saturated_branch_lengths": 1,
+   "diagnostics.py:thin_information": 1,
+   "diagnostics.py:threads_not_pinned": 1,
+   "diagnostics.py:unsupported_clades": 1,
+   "engine.py:engine_version": 1,
+   "engine.py:iqtree_version": 1,
+   "engine.py:piqtree": 4,
+   "engine.py:reproducibility": 1,
+   "engine.py:threads_pinned": 2,
+   "engine.py:validate_seed": 1,
+   "inference.py:build_ml_tree": 1,
+   "inference.py:model_moltype": 1,
+   "inference.py:require_model_for": 1,
+   "inference.py:tree_log_likelihood": 1,
+   "server.py:_annotate": 1,
+   "server.py:_annotate.<locals>.<genexpr>": 7,
+   "server.py:_load": 1,
+   "server.py:infer_tree": 1,
+   "splits.py:canonical_splits": 21,
+   "splits.py:canonical_splits.<locals>.<genexpr>": 147,
+   "splits.py:format_split": 8
+  },
+  "engine_calls": {
+   "piqtree:StandardDnaModelInstance.model_type": 1,
+   "piqtree:build_tree": 21,
+   "piqtree:make_model": 1
+  },
+  "subprocesses": {}
+ },
+ "select_substitution_model": {
+  "witness": {
+   "n_models_compared": 104,
+   "n_ranked": 3
+  },
+  "python_calls": {
+   "alignment.py:_accepts": 4,
+   "alignment.py:duplicate_groups": 1,
+   "alignment.py:duplicate_groups.<locals>.<genexpr>": 1,
+   "alignment.py:parse_fasta": 1,
+   "alignment.py:parsimony_informative": 1,
+   "alignment.py:parsimony_informative.<locals>.<genexpr>": 360,
+   "alignment.py:summarise": 1,
+   "alignment.py:summarise.<locals>.<genexpr>": 12,
+   "alignment.py:to_cogent3": 1,
+   "alignment.py:unrecognised_characters": 1,
+   "alignment.py:validate": 1,
+   "diagnostics.py:collect": 1,
+   "diagnostics.py:criteria_disagree": 1,
+   "diagnostics.py:duplicate_sequences": 1,
+   "diagnostics.py:gappy_alignment": 1,
+   "diagnostics.py:model_choice_is_close": 1,
+   "diagnostics.py:thin_information": 1,
+   "diagnostics.py:threads_not_pinned": 1,
+   "engine.py:piqtree": 1,
+   "engine.py:threads_pinned": 1,
+   "engine.py:validate_seed": 1,
+   "inference.py:ModelScore.as_dict": 3,
+   "inference.py:_information_criteria": 416,
+   "inference.py:_stats_by_name": 4,
+   "inference.py:rank_models": 4,
+   "inference.py:rank_models.<locals>.key": 836,
+   "inference.py:select_model": 1,
+   "server.py:_load": 1,
+   "server.py:select_substitution_model": 1
+  },
+  "engine_calls": {
+   "piqtree:Model.__str__": 12,
+   "piqtree:model_finder": 1
+  },
+  "subprocesses": {}
+ },
+ "compare_trees": {
+  "witness": {
+   "rf": 2,
+   "only_in_a": [
+    "c|d|e|f|g|h"
+   ]
+  },
+  "python_calls": {
+   "newick.py:_raw_tip_labels": 2,
+   "newick.py:_raw_tip_labels.<locals>._Recorder": 2,
+   "newick.py:_raw_tip_labels.<locals>._Recorder.create_edge": 30,
+   "newick.py:parse_newick": 2,
+   "newick.py:parse_newick.<locals>.<genexpr>": 4,
+   "server.py:compare_trees": 1,
+   "server.py:compare_trees.<locals>.<genexpr>": 4,
+   "splits.py:canonical_splits": 2,
+   "splits.py:canonical_splits.<locals>.<genexpr>": 56,
+   "splits.py:format_split": 2,
+   "splits.py:normalised_robinson_foulds": 1,
+   "splits.py:robinson_foulds": 2
+  },
+  "engine_calls": {},
+  "subprocesses": {}
+ },
+ "simulate_alignment": {
+  "witness": {
+   "fasta_sha": "66f371c04630078c",
+   "n_sites": 200
+  },
+  "python_calls": {
+   "alignment.py:duplicate_groups": 1,
+   "alignment.py:duplicate_groups.<locals>.<genexpr>": 1,
+   "alignment.py:parsimony_informative": 1,
+   "alignment.py:parsimony_informative.<locals>.<genexpr>": 464,
+   "alignment.py:summarise": 1,
+   "alignment.py:summarise.<locals>.<genexpr>": 12,
+   "diagnostics.py:collect": 1,
+   "diagnostics.py:duplicate_sequences": 1,
+   "diagnostics.py:gappy_alignment": 1,
+   "diagnostics.py:thin_information": 1,
+   "diagnostics.py:threads_not_pinned": 1,
+   "engine.py:piqtree": 1,
+   "engine.py:threads_pinned": 1,
+   "engine.py:validate_seed": 1,
+   "inference.py:model_moltype": 1,
+   "newick.py:_raw_tip_labels": 1,
+   "newick.py:_raw_tip_labels.<locals>._Recorder": 1,
+   "newick.py:_raw_tip_labels.<locals>._Recorder.create_edge": 9,
+   "newick.py:parse_newick": 1,
+   "newick.py:parse_newick.<locals>.<genexpr>": 2,
+   "server.py:simulate_alignment": 1,
+   "server.py:simulate_alignment.<locals>.<genexpr>": 6
+  },
+  "engine_calls": {
+   "piqtree:StandardDnaModelInstance.model_type": 1,
+   "piqtree:make_model": 1,
+   "piqtree:simulate_alignment": 1
+  },
+  "subprocesses": {}
+ },
+ "align_sequences": {
+  "witness": {
+   "fasta_sha": "c8fedc636563b162",
+   "n_sites": 149
+  },
+  "python_calls": {
+   "alignment.py:_accepts": 5,
+   "alignment.py:duplicate_groups": 1,
+   "alignment.py:duplicate_groups.<locals>.<genexpr>": 1,
+   "alignment.py:parse_fasta": 2,
+   "alignment.py:parsimony_informative": 2,
+   "alignment.py:parsimony_informative.<locals>.<genexpr>": 712,
+   "alignment.py:require_phylogenetic_signal": 1,
+   "alignment.py:summarise": 1,
+   "alignment.py:summarise.<locals>.<genexpr>": 12,
+   "alignment.py:unrecognised_characters": 2,
+   "alignment.py:validate": 1,
+   "diagnostics.py:collect": 1,
+   "diagnostics.py:duplicate_sequences": 1,
+   "diagnostics.py:gappy_alignment": 1,
+   "diagnostics.py:thin_information": 1,
+   "diagnostics.py:threads_not_pinned": 1,
+   "engine.py:threads_pinned": 1,
+   "msa.py:align": 1,
+   "msa.py:align.<locals>.<genexpr>": 6,
+   "msa.py:find_mafft": 2,
+   "msa.py:mafft_args": 2,
+   "msa.py:mafft_version": 1,
+   "msa.py:validate_unaligned": 1,
+   "server.py:align_sequences": 1,
+   "server.py:align_sequences.<locals>.<genexpr>": 6
+  },
+  "engine_calls": {},
+  "subprocesses": {
+   "mafft": 1,
+   "mafft --version": 1
+  }
+ },
+ "capabilities": {
+  "witness": {
+   "n_substitution_models": 215,
+   "mafft_found": true
+  },
+  "python_calls": {
+   "engine.py:engine_version": 1,
+   "engine.py:iqtree_version": 1,
+   "engine.py:piqtree": 3,
+   "engine.py:threads_pinned": 1,
+   "msa.py:find_mafft": 1,
+   "msa.py:mafft_version": 1,
+   "server.py:capabilities": 1,
+   "server.py:capabilities.<locals>.<genexpr>": 216
+  },
+  "engine_calls": {
+   "piqtree:available_models": 1
+  },
+  "subprocesses": {
+   "mafft --version": 1
+  }
+ }
+}
