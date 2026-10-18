@@ -126,7 +126,8 @@ acc$label <- ifelse(
   acc$level == "arm", sprintf("%s (all %d q.)", unname(all_arm_labels[acc$arm]), acc$questions),
   ifelse(acc$level == "arm_x_subset",
     sprintf("%s (sister, model, informative sites: %d q., post hoc)", unname(all_arm_labels[acc$arm]), acc$questions),
-    sprintf("Baseline: %s (%s, %d q.)", acc$arm,
+    # US spelling on the figure; the label in summary.tsv is left as written.
+    sprintf("Baseline: %s (%s, %d q.)", sub("neighbour", "neighbor", acc$arm, fixed = TRUE),
       ifelse(acc$category == "all", "all kinds", unname(cat_labels[acc$category])), acc$questions)
   )
 )

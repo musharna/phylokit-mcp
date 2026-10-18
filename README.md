@@ -131,6 +131,10 @@ thread-completion order, floating-point addition is not associative, and
 near-tied topologies can flip on the last bits. Pinning is necessary, not
 sufficient.
 
+## Does it help?
+
+We asked Claude Opus 5.5 38 phylogenetics questions, 3 times each, with a Python shell that has piqtree and MAFFT and with this server. The server was not more accurate: 36 of 38 questions right in every run against 37 (sign test p = 1). It was slower and cost more, 6.0x as long (95% CI 4.4 to 8.3) and 14.4x the cost (9.9 to 20.2) per question. A Read-only control got most answers right on half the kinds of question by reading the file alone. Method, controls and limitations: [benchmarks/agent_qa](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md).
+
 ## Limitations
 
 - **Nucleotide and protein alignments.** Pass `sequence_type="protein"` and a
