@@ -3,7 +3,7 @@
 phylokit-mcp is an MCP server that lets AI agents build maximum-likelihood
 trees with IQ-TREE 3 and align sequences with MAFFT.
 
-[![CI](https://github.com/musharna/phylokit-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/musharna/phylokit-mcp/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/musharna/phylokit-mcp/ci.yml?branch=main&label=CI)](https://github.com/musharna/phylokit-mcp/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
 [![License](https://img.shields.io/pypi/l/phylokit-mcp)](https://github.com/musharna/phylokit-mcp/blob/main/LICENSE)
@@ -45,8 +45,7 @@ chart does, the server got 110 of 114 right and a Python shell with piqtree and
 MAFFT got 113; counting questions, 36 of 38 were right in every run against 37
 (sign test p = 1). Per question the server took 6.0 times as long (95% CI 4.4
 to 8.3) and cost 14.4 times as much (9.9 to 20.2), each a geometric mean of
-per-question ratios. A Read-only control got most answers right on half the
-kinds of question by reading the file alone.
+per-question ratios.
 
 The benchmark does not score support values; method, controls and other
 limitations are in [benchmarks/agent_qa](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md).
