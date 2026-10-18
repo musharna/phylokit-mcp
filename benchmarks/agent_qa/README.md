@@ -10,6 +10,14 @@ long (95% CI 4.4 to 8.3) and cost 14.4 times as much (9.9 to 20.2). The main
 limitation is that half the kinds of question can be solved by reading the
 file: the Read-only control got 21 of 38 right in every run.
 
+**Re-run 2026-10-18, unreleased server 624fc96.** Most of that cost was the
+model pasting the data file into tool calls. With file-path inputs and a
+column-mapping tool, the server's cost fell from 14.4 to 1.26 times
+Python's (95% CI 1.04 to 1.55), and its homology misses went away. By the
+pre-registered rule this is a tie, not a win: the server cost more on 24 of
+38 questions (p = 0.14), and it was right on 36 of 38 questions in every run
+against Python's 35. See [Re-run 2026-10-18](#re-run-2026-10-18-server-624fc96).
+
 ![Right, wrong, declined or invalid per setup](agent_qa.png)
 
 ## Results
@@ -61,6 +69,73 @@ per-question medians.
 ![Right, wrong, declined or invalid by kind of question](agent_qa_by_category.png)
 
 ![Cost and time per answer, every run](agent_qa_cost_time.png)
+
+## Re-run 2026-10-18 (server 624fc96)
+
+This tests an unreleased commit,
+`git+https://github.com/musharna/phylokit-mcp@624fc9669807d35840643a4144cfb8e77d2eebef`
+(`run.py --server-spec`), against a fresh alt arm. Both arms were run in the
+same sweep, interleaved by question, 3 reps each, with the same key, scorer
+and controls. The rule was committed before the sweep, in
+[`PREREG_2026-10-18.md`](PREREG_2026-10-18.md). Rows are in
+[`rerun_2026-10-18/`](rerun_2026-10-18/).
+
+**What changed.** `diagnose.py` on the 10-16 transcripts showed where the
+cost went. Each server run wrote a median of 16,200 characters into its tool
+calls, because the model read the file and then pasted it into the call.
+Output tokens were 55% of the arm's cost. Tool definitions were not the
+cause. The commit adds `fasta_path`/`trees_path`, `map_positions` (residue to
+column to residue), and `select_substitution_model(models=[...])`, which
+replaces asking for `top_n=300` to find four models.
+
+| Per run, median | Server 10-16 | Server 10-18 | Python 10-18 |
+|---|---|---|---|
+| Characters written into tool calls | 16,230 | 85 | 698 |
+| Characters returned by tools | 19,660 | 1,345 | 326 |
+| Output tokens | 14,700 | 383 | 770 |
+| Context at the first call (tokens) | 4,872 | 6,227 | 4,278 |
+| Cost | $0.55 | $0.028 | $0.031 |
+
+**Did the model use the new tools and parameters?** It passed a path in all
+114 server runs and pasted data in none. It used `map_positions` in 18 runs
+(every homology run), `models` in 42, and Read in 23.
+
+**Result against the rule** (`analyze.py`, `win_rule`):
+
+| | Python, MAFFT, web | phylokit-mcp |
+|---|---|---|
+| Right (of 114) | 111 (3 invalid) | 111 |
+| Questions right in all 3 runs | 35 of 38 | 36 of 38 |
+| Cost / answer, median (total) | $0.031 ($3.60) | $0.028 ($6.37) |
+| Server / Python, per question | | cost 1.26 (1.04 to 1.55), time 1.53 (1.08 to 2.22) |
+
+- Non-inferior: yes, 36 against 35 − 2.
+- Cheaper: no. The server cost more on 24 of 38 questions (sign test
+  p = 0.14), and the CI is above 1. **Tie.**
+- Its cheapest kinds were RF distance (0.67 times Python's cost) and model
+  choice (1.12). Its dearest were sister taxon (2.2) and JC distance (1.8),
+  where `infer_tree` always runs a bootstrap and returns its clade list,
+  and Python's short script builds the tree without one. Every server run
+  also starts with about 1,950 more tokens of context than Python's, which
+  is the tool definitions.
+- All 3 of the server's misses were declines on q23 and q26, and they cost
+  $1.46 of its $6.37. On those two alignments, ModelFinder's AIC winner is a
+  name piqtree 0.8.3 cannot parse (bare `K3Pu`), so `select_substitution_model`
+  failed. The model then sent several `infer_tree` calls at once, and
+  concurrent calls broke the server process (piqtree changes the process's
+  working directory during each call). The same parse failure happened on
+  10-16, but the model then made its calls one at a time. Both bugs are fixed in
+  5f1b778, after the sweep. **Exploratory**, not part of the test: on 5f1b778,
+  q23 and q26 got 6 of 6 right, at $0.026 a run.
+- Python's 3 invalid rows were right answers whose traceback printed the alt
+  environment's path (the leak rule, as on 10-16).
+- From 03:02 to 06:08 EDT a rate limit rejected or stalled 23 runs (12 alt,
+  11 mcp) before any model answered. A rule that reads only the transcripts
+  (`run.py --drop-api-failures`) moved them to
+  `results.api_failures.jsonl`, and they were run again once. That deviation
+  was added to the PREREG before any analysis.
+- Cost of the sweep: $9.97, plus $0.02 for the rows the API ended, $0.06 for one
+  pilot run and $0.16 for the exploratory runs.
 
 ## Controls
 
@@ -147,7 +222,7 @@ Other limitations:
 - The server takes the alignment as a string, so the model has to read the
   file and copy its contents into the tool call. The largest file here is
   20 KB, and copying it costs output tokens. Much larger alignments would
-  need a path argument.
+  need a path argument. (The 10-18 re-run's commit adds one.)
 - One model, one date.
 
 ## Method
@@ -249,6 +324,9 @@ Raw transcripts are kept in `~/phylokit-mcp-artifacts/agent_qa/runs/` (or
    now take several results files and refuse a run found twice.
 5. The Read-only results and the post hoc subset (PR #62) showed that the
    scaling was enough for three kinds and not for RF, distance and homology.
+6. 2026-10-18: `diagnose.py`, `--server-spec`, a cost sign test and the
+   pre-registered win rule, then one confirmatory re-run of alt and mcp on
+   an unreleased commit (see above).
 
 ## Reproduce
 
@@ -263,4 +341,14 @@ uv run python benchmarks/agent_qa/run.py --rescore          # re-score stored re
 R=benchmarks/agent_qa/results.jsonl,benchmarks/agent_qa/results_read.jsonl
 uv run python benchmarks/agent_qa/analyze.py $R             # summary.tsv, paired.tsv, baselines.tsv
 Rscript benchmarks/agent_qa/plot.R $R                       # figures
+
+# the 2026-10-18 re-run (transcripts outside the repo, per PHYLOQA_ARTIFACTS)
+export PHYLOQA_ARTIFACTS=~/phylokit-mcp-artifacts/agent_qa/rerun-2026-10-18
+S=git+https://github.com/musharna/phylokit-mcp@624fc9669807d35840643a4144cfb8e77d2eebef
+R2=benchmarks/agent_qa/rerun_2026-10-18/results.jsonl
+uv run python benchmarks/agent_qa/run.py --setup-alt
+uv run python benchmarks/agent_qa/run.py --arms alt,mcp --reps 3 --workers 1 --server-spec $S --results $R2
+uv run python benchmarks/agent_qa/run.py --drop-api-failures --results $R2   # then run the line above again
+uv run python benchmarks/agent_qa/analyze.py $R2                             # prints the win-rule verdict
+uv run python benchmarks/agent_qa/diagnose.py $PHYLOQA_ARTIFACTS/runs       # tokens and mechanism counts
 ```

@@ -139,7 +139,7 @@ sufficient.
 
 ## Does it help?
 
-We asked Claude Opus 5.5 38 phylogenetics questions, 3 times each, with a Python shell that has piqtree and MAFFT and with this server. The server was not more accurate: 36 of 38 questions right in every run against 37 (sign test p = 1). It was slower and cost more, 6.0x as long (95% CI 4.4 to 8.3) and 14.4x the cost (9.9 to 20.2) per question. A Read-only control got most answers right on half the kinds of question by reading the file alone. Method, controls and limitations: [benchmarks/agent_qa](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md).
+We asked Claude Opus 5.5 38 phylogenetics questions, 3 times each, with a Python shell that has piqtree and MAFFT and with this server. The server was not more accurate: 36 of 38 questions right in every run against 37 (sign test p = 1). It was slower and cost more, 6.0x as long (95% CI 4.4 to 8.3) and 14.4x the cost (9.9 to 20.2) per question. A Read-only control got most answers right on half the kinds of question by reading the file alone. Most of that cost was the model pasting the data file into tool calls. In a pre-registered re-run of an unreleased commit (2026-10-18) with file-path inputs and a column-mapping tool, the server cost 1.26 times as much as Python (95% CI 1.04 to 1.55), down from 14.4. It was right on 36 of 38 questions in every run against Python's 35. That is a tie under the rule set beforehand: the server was as accurate, and not cheaper. Method, controls and limitations: [benchmarks/agent_qa](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md).
 
 ## Limitations
 
