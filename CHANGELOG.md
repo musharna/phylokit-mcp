@@ -11,11 +11,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Agent benchmark** (`benchmarks/agent_qa/`): 38 phylogenetics questions
   (sister taxon, Robinson-Foulds distance, homologous residue after
   alignment, lowest-BIC model, JC69 distance, parsimony-informative sites) on
-  inputs too large to work by eye (16-24 taxa, 800-1200 sites, 30-50-tip
-  trees), given as files only. They are asked to Claude with no tools, with
-  Python (piqtree, cogent3) + MAFFT + web, and with this server. The answer key comes from simulators written without the server or
-  its libraries; deterministic scorer with per-category tolerance rules,
-  tested in `tests/test_agent_qa_score.py`. Results pending the full sweep.
+  16-24 taxa, 800-1200 sites and 30-50-tip trees, given as files only. They
+  are asked to Claude with no tools, with Read only (a control), with Python
+  (piqtree, cogent3) + MAFFT + web, and with this server. The answer key comes
+  from simulators written without the server or its libraries; deterministic
+  scorer with per-category tolerance rules, tested in
+  `tests/test_agent_qa_score.py`. Result: the server is not more accurate than
+  the Python shell (36 vs 37 of 38 questions right in every run, p = 1), and
+  takes 6.0x as long and costs 14.4x as much per question. Read only gets
+  most answers right on three of the six kinds by hand.
 - **Work-count perf ratchet** (`benchmarks/perf/`): calls into the package,
   calls into piqtree and MAFFT launches per tool on fixed inputs, compared
   exactly with `baseline.json` in CI and in `tests/test_perf_ratchet.py`. A
