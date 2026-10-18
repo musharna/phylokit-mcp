@@ -93,6 +93,7 @@
    "inference.py:ModelScore.as_dict": 3,
    "inference.py:_information_criteria": 416,
    "inference.py:_stats_by_name": 4,
+   "inference.py:model_finder_stats": 1,
    "inference.py:rank_models": 4,
    "inference.py:rank_models.<locals>.key": 836,
    "inference.py:select_model": 1,
@@ -101,8 +102,9 @@
    "server.py:select_substitution_model": 1
   },
   "engine_calls": {
-   "piqtree:Model.__str__": 12,
-   "piqtree:model_finder": 1
+   "piqtree:ModelResultValue.from_string": 104,
+   "piqtree:iqtree_func.<locals>.wrapper_iqtree_func": 1,
+   "piqtree:process_rand_seed_nonzero": 1
   },
   "subprocesses": {}
  },

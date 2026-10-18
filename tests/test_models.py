@@ -206,3 +206,40 @@ def test_simulation_varies_with_the_seed():
     a = simulate_alignment(newick=TRUE_NEWICK, model="JC", length=200, seed=5)
     b = simulate_alignment(newick=TRUE_NEWICK, model="JC", length=200, seed=6)
     assert a["fasta"] != b["fasta"]
+
+
+def _benchmark_alignment(qid: str) -> str:
+    import json
+    from pathlib import Path
+
+    key = Path(__file__).parent.parent / "benchmarks" / "agent_qa" / "questions.json"
+    (q,) = [q for q in json.loads(key.read_text())["questions"] if q["id"] == qid]
+    return q["files"]["alignment.fasta"]
+
+
+def test_raw_model_stats_equal_piqtrees_own_where_its_call_works(fasta_easy):
+    from phylokit_mcp.alignment import parse_fasta, to_cogent3
+    from phylokit_mcp.engine import piqtree
+    from phylokit_mcp.inference import model_finder_stats
+
+    aln = to_cogent3(parse_fasta(fasta_easy))
+    public = piqtree().model_finder(aln, rand_seed=1).model_stats
+    ours = model_finder_stats(aln, 1)
+    assert ours == {k: v for k, v in public.items() if isinstance(k, str)}
+    assert len(ours) > 100
+
+
+def test_a_best_model_piqtree_cannot_parse_does_not_lose_the_ranking():
+    """q23's AIC winner is a name piqtree 0.8.3's make_model rejects; its own
+    model_finder fails on it, and ours must still rank every model."""
+    from phylokit_mcp.alignment import parse_fasta, to_cogent3
+    from phylokit_mcp.engine import piqtree
+
+    fasta = _benchmark_alignment("q23")
+    with pytest.raises(ValueError, match="Unknown substitution model"):
+        piqtree().model_finder(to_cogent3(parse_fasta(fasta)), rand_seed=1)
+    out = select_substitution_model(
+        fasta, criterion="BIC", models=["JC", "K2P", "F81+F", "HKY+F"]
+    )
+    assert out["best_model"] == "F81+F"  # the generating model (questions.json)
+    assert len(out["ranking"]) == 4

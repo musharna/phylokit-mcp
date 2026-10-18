@@ -183,6 +183,46 @@ def restrict_models(
     return subset, resolved, warnings
 
 
+def model_finder_stats(aln, seed: int) -> dict:
+    """ModelFinder's per-model statistics, keyed by IQ-TREE's model names.
+
+    piqtree 0.8.3's `model_finder` builds a ModelFinderResult whose constructor
+    parses the three best-model names with `make_model`, and that parser does
+    not know every name ModelFinder reports. On the agent benchmark's q23 and
+    q26 alignments the AIC winner is bare "K3Pu", and the whole call failed
+    with "Unknown substitution model: 'K3Pu'", every statistic lost with it.
+    The statistics are all in IQ-TREE's raw output, so they are read from it
+    here, with piqtree's own call and parser for each value. This uses
+    piqtree's private `_model_finder` module; `tests/test_models.py` checks
+    that it returns exactly what the public call returns where that call works.
+    """
+    piqtree()  # the engine module, imported under engine.py's thread pin
+    # PyYAML is piqtree's dependency, and this parses piqtree's output exactly
+    # as its own model_finder does; it goes if that private module changes.
+    import yaml  # type: ignore[import-untyped]
+    from piqtree.iqtree import _model_finder as mf
+    from piqtree.util import process_rand_seed_nonzero
+
+    names = aln.names
+    raw = yaml.safe_load(
+        mf.iq_model_finder(
+            names,
+            [str(s) for s in aln.iter_seqs(names)],
+            process_rand_seed_nonzero(seed),
+            "",
+            "",
+            "",
+            1,
+            "",
+        )
+    )
+    return {
+        key: mf.ModelResultValue.from_string(val)
+        for key, val in raw.items()
+        if not key.startswith(("best_", "initTree")) and isinstance(val, str)
+    }
+
+
 def select_model(
     seqs: dict[str, str],
     criterion: str = "AIC",
@@ -201,8 +241,7 @@ def select_model(
     if models is not None and not models:
         raise ValueError("models is empty; omit it to rank every model.")
     n_sites = len(next(iter(seqs.values())))
-    result = piqtree().model_finder(to_cogent3(seqs, moltype), rand_seed=seed)
-    stats = result.model_stats
+    stats = model_finder_stats(to_cogent3(seqs, moltype), seed)
     resolved: dict[str, str] = {}
     warnings: list[dict] = []
     if models is not None:

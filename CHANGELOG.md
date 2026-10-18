@@ -42,6 +42,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   for one model (IQ-TREE's bare `F81` is JC) are flagged. The benchmark's
   server arm asked for `top_n` up to 300 to find four models, 15 KB of output.
 
+### Fixed
+
+- **Concurrent tool calls corrupted the process.** MCPServer runs sync tools
+  in worker threads, and piqtree's engine wrapper chdirs into a temporary
+  directory it deletes and redirects fds 1 and 2 for each call. Two calls in
+  one client turn left the server in a deleted directory, and every later call
+  failed. Tool calls now run one at a time under a process lock
+  (`tests/test_concurrent_calls.py`).
+- **`select_substitution_model` failed outright when ModelFinder's winner was
+  a name piqtree cannot parse** (bare `K3Pu` on 2 of the benchmark's 8 model
+  alignments: "Unknown substitution model"). The statistics are now read from
+  IQ-TREE's raw output, checked equal to piqtree's own where its call works.
+
 ## [0.6.0] — 2026-09-26
 
 ### Fixed

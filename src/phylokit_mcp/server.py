@@ -4,9 +4,14 @@
 piqtree loads, and IQ-TREE reads that variable when its thread pool initialises.
 Import order here is load-bearing, not incidental.
 
-Tools are synchronous. IQ-TREE holds process-global state and the bootstrap is
-CPU-bound; serialising calls on the event loop keeps concurrent invocations from
-interleaving inside the engine.
+Tools are synchronous, and they run one at a time under `_ENGINE_LOCK`.
+MCPServer runs a sync tool in a worker thread (`anyio.to_thread`), so calls a
+client sends together run concurrently unless something stops them, and
+piqtree's engine wrapper changes process-global state for the length of a call:
+it chdirs into a temporary directory it then deletes, and points file
+descriptors 1 and 2 (stdout is the JSON-RPC stream) at /dev/null. Interleaved,
+two calls left the process in a deleted directory and every later call failed
+(the 2026-10-18 benchmark re-run, three `infer_tree` calls in one turn).
 """
 
 # isort: off  -- engine MUST come before anything that could pull in piqtree.
@@ -17,6 +22,7 @@ from . import engine  # noqa: I001
 # and piqtree ships wheels for 3.12+ only, so this package cannot run on a
 # version where the typing_extensions backport would be required.
 import functools
+import threading
 from typing import Any, NotRequired, TypedDict
 
 # mcp 2.x renamed FastMCP to MCPServer and moved it out of mcp.server.fastmcp,
@@ -701,6 +707,10 @@ def capabilities(include_models: bool = False) -> CapabilitiesResult:
     return out
 
 
+# One tool call at a time per process; see the module docstring.
+_ENGINE_LOCK = threading.Lock()
+
+
 def _surfaces_refusals(fn):
     """Re-raise an anticipated refusal as ToolError so its text reaches the model.
 
@@ -729,7 +739,8 @@ def _surfaces_refusals(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
-            return fn(*args, **kwargs)
+            with _ENGINE_LOCK:
+                return fn(*args, **kwargs)
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
 
