@@ -520,6 +520,58 @@ def run_one(
     }
 
 
+def api_failure(events: list[dict[str, Any]], rc: object) -> str | None:
+    """Why the API, not the model, ended this run, or None.
+
+    Read from the transcript alone, never from the reply or its score, so the
+    same rule picks rows in every arm: the account's rate limit rejected a
+    request, the result says the API errored, or the run hit RUN_TIMEOUT_S
+    with no result at all. In the 2026-10-18 sweep a five-hour limit rejected
+    every request for 18 minutes and the next 6 runs stalled to the timeout,
+    alt and mcp alike.
+    """
+    for e in events:
+        if (
+            e.get("type") == "rate_limit_event"
+            and (e.get("rate_limit_info") or {}).get("status") == "rejected"
+        ):
+            return "rate_limited"
+    result = next((e for e in events if e.get("type") == "result"), None)
+    if result is not None and result.get("terminal_reason") == "api_error":
+        return "api_error"
+    if rc == "timeout" and result is None:
+        return "timeout"
+    return None
+
+
+def drop_api_failures(results: Path) -> None:
+    """Move every row the API ended (``api_failure``) out of ``results`` into
+    ``<results>.api_failures.jsonl``, so a resumed sweep runs those triples
+    again. The moved rows are kept, and the counts are printed per arm."""
+    rows = [json.loads(ln) for ln in results.read_text().splitlines()]
+    keep, moved = [], []
+    for r in rows:
+        path = transcript(r["arm"], r["qid"], r["rep"])
+        if not path.exists():
+            raise SystemExit(
+                f"no transcript for {r['arm']} {r['qid']} rep{r['rep']}: {path}"
+            )
+        events = [
+            json.loads(ln) for ln in path.read_text().splitlines() if ln.startswith("{")
+        ]
+        why = api_failure(events, r["exit"])
+        (moved if why else keep).append(r | ({"api_failure": why} if why else {}))
+    side = results.with_name(results.stem + ".api_failures.jsonl")
+    with side.open("a") as fh:
+        for r in moved:
+            fh.write(json.dumps(r) + "\n")
+    results.write_text("".join(json.dumps(r) + "\n" for r in keep))
+    for arm in sorted({r["arm"] for r in rows}):
+        mine = [r for r in moved if r["arm"] == arm]
+        reasons = sorted({r["api_failure"] for r in mine})
+        print(f"{arm}: {len(mine)} rows moved to {side.name} {reasons}")
+
+
 def rescore(results: Path, by_id: dict[str, dict[str, Any]]) -> None:
     """Score each stored reply again, and re-judge its validity from its
     transcript, so a truth, scorer or validity fix reaches runs made before it;
@@ -578,6 +630,12 @@ def main() -> None:
         "--setup-alt", action="store_true", help="build the alt arm's Python"
     )
     ap.add_argument(
+        "--drop-api-failures",
+        action="store_true",
+        help="move rows the API ended (rate limit, API error, timeout with no "
+        "result) to a side file so a resumed sweep runs them again; run nothing",
+    )
+    ap.add_argument(
         "--rescore",
         action="store_true",
         help="re-score every stored reply against the current questions.json, run nothing",
@@ -593,6 +651,9 @@ def main() -> None:
     bad = oracle_check(questions)
     if bad:
         raise SystemExit("oracle check failed:\n" + "\n".join(bad))
+    if a.drop_api_failures:
+        drop_api_failures(Path(a.results))
+        return
     if a.rescore:
         rescore(Path(a.results), {q["id"]: q for q in questions})
         return

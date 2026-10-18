@@ -371,3 +371,20 @@ def test_the_win_rule_needs_non_inferiority_and_a_significant_cost_cut() -> None
     # Significantly costlier is a loss.
     costly = base | {"questions_b_costlier": 33, "cost_ratio_ci": (1.5, 3.0)}
     assert analyze.win_rule(costly) == "LOSS"
+
+
+def test_api_failures_are_told_apart_from_model_failures() -> None:
+    init = {"type": "system", "subtype": "init"}
+    done = {"type": "result", "subtype": "success", "terminal_reason": "completed"}
+    allowed = {
+        "type": "rate_limit_event",
+        "rate_limit_info": {"status": "allowed_warning"},
+    }
+    rejected = {"type": "rate_limit_event", "rate_limit_info": {"status": "rejected"}}
+    # A finished run, even a wrong or slow one, or one warned near its limit, is the model's.
+    assert run.api_failure([init, allowed, done], 0) is None
+    assert run.api_failure([init, done], "timeout") is None
+    errored = {"type": "result", "is_error": True, "terminal_reason": "api_error"}
+    assert run.api_failure([init, rejected, errored], 1) == "rate_limited"
+    assert run.api_failure([init, errored], 1) == "api_error"
+    assert run.api_failure([init], "timeout") == "timeout"
