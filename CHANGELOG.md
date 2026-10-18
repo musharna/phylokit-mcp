@@ -25,6 +25,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   exactly with `baseline.json` in CI and in `tests/test_perf_ratchet.py`. A
   rise fails; a drop fails until locked in with `--update`; raising the
   baseline needs `--allow-increase`. Identical on Python 3.12, 3.13 and 3.14.
+- **File-path inputs**: `fasta_path` on `infer_tree`,
+  `select_substitution_model`, `align_sequences` and `map_positions`, and
+  `trees_path` (a file of two trees) on `compare_trees`. Exactly one of the
+  text and the path; the path must be a regular UTF-8 file of at most 32 MiB,
+  and a relative path resolves against the server's working directory, which
+  every refusal names. In the agent benchmark the inline payload was the
+  server arm's cost: a median of 16,000 characters written into tool calls
+  per question.
+- **`map_positions`**: a residue's alignment column, and what every sequence
+  holds there (its residue position, or the residues either side of a gap).
+  `aligned=false` aligns with MAFFT first. All 4 wrong server answers in the
+  agent benchmark were hand counts along an alignment.
+- **`select_substitution_model(models=[...])`**: rank only the named models,
+  all returned. JC69, K80 and HKY85 resolve to IQ-TREE names, and two names
+  for one model (IQ-TREE's bare `F81` is JC) are flagged. The benchmark's
+  server arm asked for `top_n` up to 300 to find four models, 15 KB of output.
 
 ## [0.6.0] — 2026-09-26
 

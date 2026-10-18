@@ -330,3 +330,44 @@ def test_the_needs_compute_subset_keeps_only_its_kinds_and_pairs_on_them() -> No
     assert not [
         r for r in analyze.arm_rows(rf_only, rng) if r["level"] == "arm_x_subset"
     ]
+
+
+# --- server spec ---------------------------------------------------------------
+
+
+def test_server_spec_takes_the_pin_or_a_full_commit_and_nothing_else() -> None:
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    assert run.check_server_spec(run.SERVER) is None
+    assert (
+        run.check_server_spec(f"git+https://github.com/musharna/phylokit-mcp@{sha}")
+        == sha
+    )
+    for bad in (
+        "git+https://github.com/musharna/phylokit-mcp@main",  # a branch moves
+        f"git+https://github.com/musharna/phylokit-mcp@{sha[:12]}",  # short sha
+        f"git+https://github.com/someone/phylokit-mcp@{sha}",  # another repo
+        "phylokit-mcp==0.5.1",
+    ):
+        try:
+            run.check_server_spec(bad)
+        except SystemExit as exc:
+            assert "--server-spec must be" in str(exc)
+        else:
+            raise AssertionError(f"{bad!r} was accepted")
+
+
+def test_the_win_rule_needs_non_inferiority_and_a_significant_cost_cut() -> None:
+    base = {
+        "questions": 38, "a_right_every_run": 37, "b_right_every_run": 36,
+        "questions_b_costlier": 5, "cost_sign_test_p": 1e-5, "cost_ratio_ci": (0.4, 0.7),
+    }  # fmt: skip
+    assert analyze.win_rule(base) == "WIN"
+    # Two questions down is still non-inferior; three is not.
+    assert analyze.win_rule(base | {"b_right_every_run": 35}) == "WIN"
+    assert analyze.win_rule(base | {"b_right_every_run": 34}) == "LOSS"
+    # Cheaper but not significantly, or a CI that reaches 1: a tie.
+    assert analyze.win_rule(base | {"cost_sign_test_p": 0.06}) == "TIE"
+    assert analyze.win_rule(base | {"cost_ratio_ci": (0.6, 1.02)}) == "TIE"
+    # Significantly costlier is a loss.
+    costly = base | {"questions_b_costlier": 33, "cost_ratio_ci": (1.5, 3.0)}
+    assert analyze.win_rule(costly) == "LOSS"

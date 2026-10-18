@@ -261,6 +261,11 @@ def paired_rows(
                 > np.median([r["seconds"] for r in qa[q]])
                 for q in qids
             )
+            costlier = sum(
+                np.median([r["cost_usd"] for r in qb[q]])
+                > np.median([r["cost_usd"] for r in qa[q]])
+                for q in qids
+            )
             out.append(
                 {
                     "a": a,
@@ -280,9 +285,33 @@ def paired_rows(
                     "seconds_sign_test_p": sign_test(slower, len(qids) - slower),
                     "cost_ratio_b_over_a": ratio("cost_usd")(qids),
                     "cost_ratio_ci": bootstrap(qids, ratio("cost_usd"), rng),
+                    "questions_b_costlier": costlier,
+                    "cost_sign_test_p": sign_test(costlier, len(qids) - costlier),
                 }
             )
     return out
+
+
+def win_rule(p: dict[str, Any], margin: int = 2, alpha: float = 0.05) -> str:
+    """PREREG_2026-10-18's rule for b (the server) against a (alt), on cost.
+
+    Non-inferior: b's questions right in every run >= a's - margin. Better on the
+    primary endpoint (per-question median cost): the sign test on questions where
+    b costs more vs less has p < alpha AND the bootstrap 95% CI of the geometric
+    mean b/a cost ratio lies wholly below 1. Win needs both. Loss: b not
+    non-inferior, or b significantly costlier (p < alpha, CI wholly above 1).
+    Anything else is a tie.
+    """
+    non_inferior = p["b_right_every_run"] >= p["a_right_every_run"] - margin
+    lo, hi = p["cost_ratio_ci"]
+    sig = p["cost_sign_test_p"] < alpha
+    cheaper = sig and hi < 1 and p["questions_b_costlier"] < p["questions"] / 2
+    costlier = sig and lo > 1 and p["questions_b_costlier"] > p["questions"] / 2
+    if non_inferior and cheaper:
+        return "WIN"
+    if not non_inferior or costlier:
+        return "LOSS"
+    return "TIE"
 
 
 def _flatten(row: dict[str, Any]) -> dict[str, str]:
@@ -334,8 +363,12 @@ def main(argv: list[str]) -> None:
             f"{p['a_right_every_run']} of {p['questions']}, discordant {p['b_only']}:{p['a_only']}, "
             f"p={p['sign_test_p']:.3g}; seconds x{p['seconds_ratio_b_over_a']:.2f} "
             f"{tuple(round(x, 2) for x in p['seconds_ratio_ci'])}; cost "
-            f"x{p['cost_ratio_b_over_a']:.2f} {tuple(round(x, 2) for x in p['cost_ratio_ci'])}"
+            f"x{p['cost_ratio_b_over_a']:.2f} {tuple(round(x, 2) for x in p['cost_ratio_ci'])}, "
+            f"costlier on {p['questions_b_costlier']} of {p['questions']} "
+            f"(p={p['cost_sign_test_p']:.3g})"
         )
+        if (p["a"], p["b"], p["subset"]) == ("alt", "mcp", "all"):
+            print(f"win rule (PREREG_2026-10-18, cost endpoint): {win_rule(p)}")
 
 
 if __name__ == "__main__":

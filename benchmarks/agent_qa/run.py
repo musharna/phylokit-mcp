@@ -11,7 +11,8 @@ question's data files; the data are NOT in the prompt):
   phylokit-mcp) and MAFFT on PATH. Its prompt says so (ALT_NOTE): a user who
   installed them knows they did, as the mcp arm learns its tools from their
   descriptions. That note is the only difference between the arms' prompts.
-- ``mcp``:  phylokit-mcp (pinned PyPI release via uvx) plus Read, MAFFT on
+- ``mcp``:  phylokit-mcp (pinned PyPI release via uvx, or the commit named
+  by ``--server-spec``) plus Read, MAFFT on
   PATH, and no shell. Read is there because the server takes sequences as a
   string, not a path, so the data must be read before it can be passed. Its
   libraries are constrained to the alt arm's (the repo's uv.lock), so both
@@ -40,6 +41,12 @@ mark every run invalid.
 
     uv run python benchmarks/agent_qa/run.py --setup-alt     # once: builds .alt-env
     uv run python benchmarks/agent_qa/run.py --reps 3 --workers 2
+
+``--server-spec git+https://github.com/musharna/phylokit-mcp@<40-hex sha>``
+runs the mcp arm on an unreleased commit instead of the PyPI pin. The spec is
+written into every result row and into ``--versions`` (a JSON file of what each
+arm ran on), and ``check_mcp`` confirms the installed package came from that
+commit before any run is spent.
 """
 
 from __future__ import annotations
@@ -65,6 +72,10 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 MODEL = "claude-opus-5-5"
 SERVER = "phylokit-mcp==0.6.0"
+# A git spec must name a full commit: a branch or tag can move under a sweep.
+GIT_SPEC = re.compile(
+    r"^git\+https://github\.com/musharna/phylokit-mcp@([0-9a-f]{40})$"
+)
 RUN_TIMEOUT_S = 1800
 ARTIFACTS = Path(
     os.environ.get(
@@ -208,30 +219,57 @@ def check_alt(checked: dict[str, str]) -> dict[str, str]:
     return versions
 
 
-def _uvx_server_args() -> list[str]:
+def check_server_spec(spec: str) -> str | None:
+    """The PyPI pin, or a git spec naming a full commit; returns the commit."""
+    if spec == SERVER:
+        return None
+    m = GIT_SPEC.match(spec)
+    if not m:
+        raise SystemExit(
+            f"--server-spec must be {SERVER!r} or "
+            f"git+https://github.com/musharna/phylokit-mcp@<40-hex sha>; got {spec!r}"
+        )
+    return m.group(1)
+
+
+def _uvx_server_args(spec: str = SERVER) -> list[str]:
     """uvx arguments for the server, its libraries constrained to the alt env's
     (the repo's uv.lock), so the two arms differ in the server, not the stack."""
     reqs = ALT_REQS
     if not reqs.exists():
         raise SystemExit(f"{reqs} missing: run with --setup-alt first")
-    return ["--constraints", str(reqs), SERVER]
+    return ["--constraints", str(reqs), "--from", spec, "phylokit-mcp"]
 
 
-def check_mcp(checked: dict[str, str]) -> dict[str, str]:
-    """The server's own environment, resolved as the mcp arm will start it."""
+_SERVER_ORIGIN = (
+    "import importlib.metadata as m, json; d = m.distribution('phylokit-mcp'); "
+    "u = d.read_text('direct_url.json'); "
+    "print(json.dumps({'phylokit-mcp': d.version, "
+    "'commit': json.loads(u).get('vcs_info', {}).get('commit_id') if u else None}))"
+)
+
+
+def check_mcp(checked: dict[str, str], spec: str = SERVER) -> dict[str, str]:
+    """The server's own environment, resolved as the mcp arm will start it; for
+    a git spec, the installed package must say it came from that commit."""
     uvx = shutil.which("uvx")
     if uvx is None:
         raise SystemExit("uvx not found")
-    args = _uvx_server_args()
-    ok = subprocess.run(
-        [uvx, *args[:-1], "--from", args[-1], "python", "-c", _VERSIONS],
-        capture_output=True, text=True, check=False, timeout=600,
-    )  # fmt: skip
-    if ok.returncode != 0:
-        raise SystemExit(f"cannot resolve {SERVER}: {ok.stderr}")
-    versions = json.loads(ok.stdout.strip().splitlines()[-1])
-    _expect_engine(SERVER, versions, checked)
-    return versions
+    args = _uvx_server_args(spec)[:-1]
+    out: dict[str, str] = {}
+    for code in (_VERSIONS, _SERVER_ORIGIN):
+        ok = subprocess.run(
+            [uvx, *args, "python", "-c", code],
+            capture_output=True, text=True, check=False, timeout=600,
+        )  # fmt: skip
+        if ok.returncode != 0:
+            raise SystemExit(f"cannot resolve {spec}: {ok.stderr}")
+        out |= json.loads(ok.stdout.strip().splitlines()[-1])
+    _expect_engine(spec, out, checked)
+    commit = check_server_spec(spec)
+    if commit is not None and out.get("commit") != commit:
+        raise SystemExit(f"{spec} installed commit {out.get('commit')!r}, not {commit}")
+    return out
 
 
 def check_mafft(checked: dict[str, str]) -> None:
@@ -246,7 +284,9 @@ def check_mafft(checked: dict[str, str]) -> None:
         )
 
 
-def arm_setup(arm: str, tmp: Path) -> tuple[list[str], dict[str, str]]:
+def arm_setup(
+    arm: str, tmp: Path, spec: str = SERVER
+) -> tuple[list[str], dict[str, str]]:
     """The claude flags and the environment for one arm."""
     empty = tmp.parent / f"{tmp.name}-no-mcp.json"
     empty.write_text('{"mcpServers": {}}')
@@ -280,7 +320,7 @@ def arm_setup(arm: str, tmp: Path) -> tuple[list[str], dict[str, str]]:
                     "mcpServers": {
                         "phylokit": {
                             "command": uvx,
-                            "args": _uvx_server_args(),
+                            "args": _uvx_server_args(spec),
                             "env": {"PATH": path, "TMPDIR": str(own_tmp)},
                         }
                     }
@@ -397,7 +437,9 @@ def transcript(arm: str, qid: str, rep: int) -> Path:
     return RUNS / arm / f"{qid}-{rep}.jsonl"
 
 
-def run_one(arm: str, q: dict[str, Any], rep: int) -> dict[str, Any]:
+def run_one(
+    arm: str, q: dict[str, Any], rep: int, spec: str = SERVER
+) -> dict[str, Any]:
     out = transcript(arm, q["id"], rep)
     out.parent.mkdir(parents=True, exist_ok=True)
     question = q["question"] + (ALT_NOTE if arm == "alt" else "")
@@ -411,7 +453,7 @@ def run_one(arm: str, q: dict[str, Any], rep: int) -> dict[str, Any]:
         tmp.mkdir()
         for name, text in q.get("files", {}).items():
             (tmp / name).write_text(text)
-        flags, env = arm_setup(arm, tmp)
+        flags, env = arm_setup(arm, tmp, spec)
         cmd = [
             claude, "-p", prompt, "--model", MODEL, "--setting-sources", "",
             "--output-format", "stream-json", "--verbose", "--system-prompt", SYSTEM,
@@ -470,6 +512,7 @@ def run_one(arm: str, q: dict[str, Any], rep: int) -> dict[str, Any]:
         "mentions_phylokit": any("phylokit" in s.lower() for s in inputs),
         "mentions_key": any("questions.json" in s or "agent_qa" in s for s in inputs),
         "cost_usd": result.get("total_cost_usd"),
+        "server_spec": spec if arm == "mcp" else None,
         "cwd": _home_as_tilde(init.get("cwd")),
         "reply": reply,
         **score(q, reply),
@@ -520,6 +563,18 @@ def main() -> None:
     ap.add_argument("--only", default="", help="comma-separated question ids")
     ap.add_argument("--results", default=str(HERE / "results.jsonl"))
     ap.add_argument(
+        "--server-spec",
+        default=SERVER,
+        help=f"the mcp arm's server: {SERVER} or git+https://github.com/musharna/"
+        "phylokit-mcp@<full sha> (an unreleased commit)",
+    )
+    ap.add_argument(
+        "--versions",
+        default="",
+        help="write what each arm ran on to this JSON file (default: versions.json "
+        "beside --results)",
+    )
+    ap.add_argument(
         "--setup-alt", action="store_true", help="build the alt arm's Python"
     )
     ap.add_argument(
@@ -545,12 +600,39 @@ def main() -> None:
     unknown = set(arms) - set(ARMS)
     if unknown:
         raise SystemExit(f"unknown arms {sorted(unknown)}; known: {ARMS}")
+    check_server_spec(a.server_spec)
+    versions: dict[str, Any] = {"arms": arms, "model": MODEL}
     if "alt" in arms:
-        print("alt env:", check_alt(key["checked_with"]), flush=True)
+        versions["alt"] = check_alt(key["checked_with"])
+        print("alt env:", versions["alt"], flush=True)
     if "mcp" in arms:
-        print("server env:", check_mcp(key["checked_with"]), flush=True)
+        versions["server_spec"] = a.server_spec
+        versions["mcp"] = check_mcp(key["checked_with"], a.server_spec)
+        print("server env:", versions["mcp"], flush=True)
     if {"alt", "mcp"} & set(arms):
         check_mafft(key["checked_with"])
+        versions["mafft"] = key["checked_with"]["mafft"]
+    claude = shutil.which("claude")
+    if claude is None:
+        raise SystemExit("claude not found on PATH")
+    versions["claude_code"] = subprocess.run(
+        [claude, "--version"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    versions["started"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    vpath = Path(a.versions or Path(a.results).with_name("versions.json"))
+    if vpath.exists():
+        old = json.loads(vpath.read_text())
+        same = {k: old.get(k) for k in ("server_spec", "mcp", "alt", "mafft")}
+        if same != {k: versions.get(k) for k in same}:
+            raise SystemExit(
+                f"{vpath} records another setup ({same}); a resumed sweep must run on "
+                "the same one"
+            )
+        versions["started"] = old.get("started", versions["started"])
+        versions["resumed"] = old.get("resumed", []) + [
+            time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        ]
+    vpath.write_text(json.dumps(versions, indent=2) + "\n")
     if a.only:
         keep = set(a.only.split(","))
         questions = [q for q in questions if q["id"] in keep]
@@ -570,7 +652,7 @@ def main() -> None:
     print(f"{len(todo)} runs to do ({len(done)} already in {results.name})", flush=True)
     lock = threading.Lock()
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
-        futures = [pool.submit(run_one, *t) for t in todo]
+        futures = [pool.submit(run_one, *t, a.server_spec) for t in todo]
         for n, f in enumerate(as_completed(futures), 1):
             r = f.result()
             with lock, results.open("a") as fh:

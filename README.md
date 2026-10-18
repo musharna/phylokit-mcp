@@ -16,7 +16,7 @@ its wheel.
 **A topology without support is not a result.** `infer_tree` always runs a
 bootstrap and always returns per-clade support. There is no flag to skip it.
 
-6 tools. The test suite runs real IQ-TREE and real MAFFT (no mocked engine),
+7 tools. The test suite runs real IQ-TREE and real MAFFT (no mocked engine),
 and includes 23 mutation checks and a real-process JSON-RPC handshake test.
 
 ## Why the rule
@@ -62,7 +62,13 @@ result the caller cannot evaluate.
 | `compare_trees`             | Robinson–Foulds distance and the clades that differ. Compares splits, not strings. |
 | `simulate_alignment`        | Generates sequences along a tree you specify — the positive control.               |
 | `align_sequences`           | Aligns unaligned FASTA with MAFFT; the output goes straight into `infer_tree`.     |
+| `map_positions`             | Maps a residue to its alignment column, and that column to every other sequence.   |
 | `capabilities`              | piqtree and IQ-TREE versions, 215 substitution models, MAFFT version, limits.      |
+
+Every tool that takes FASTA or Newick also takes a file path (`fasta_path`,
+or `trees_path` for a file of two trees), read by the server and capped at
+32 MiB, so a client does not have to paste the file into the call. A relative
+path resolves against the server's working directory.
 
 ## Install
 
@@ -76,7 +82,7 @@ but it requires **Python 3.12+**, and so does this package.
 `align_sequences` is the one tool that needs something pip cannot install: the
 [MAFFT](https://mafft.cbrc.jp/alignment/software/) binary on `PATH`
 (`apt install mafft`, `brew install mafft`, or `conda install -c bioconda mafft`).
-The other five tools work without it, `capabilities` reports
+The other tools work without it (`map_positions` needs it only for unaligned input), `capabilities` reports
 `aligner_version: null`, and calling `align_sequences` returns a refusal that
 names the install rather than a crash. A MAFFT that is installed but does not
 answer `--version` is a different state: `aligner_version` is still `null` and

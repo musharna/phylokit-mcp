@@ -47,6 +47,7 @@
    "inference.py:model_moltype": 1,
    "inference.py:require_model_for": 1,
    "inference.py:tree_log_likelihood": 1,
+   "inputs.py:text_or_path": 1,
    "server.py:_annotate": 1,
    "server.py:_annotate.<locals>.<genexpr>": 7,
    "server.py:_load": 1,
@@ -95,6 +96,7 @@
    "inference.py:rank_models": 4,
    "inference.py:rank_models.<locals>.key": 836,
    "inference.py:select_model": 1,
+   "inputs.py:text_or_path": 1,
    "server.py:_load": 1,
    "server.py:select_substitution_model": 1
   },
@@ -187,6 +189,7 @@
    "diagnostics.py:thin_information": 1,
    "diagnostics.py:threads_not_pinned": 1,
    "engine.py:threads_pinned": 1,
+   "inputs.py:text_or_path": 1,
    "msa.py:align": 1,
    "msa.py:align.<locals>.<genexpr>": 6,
    "msa.py:find_mafft": 2,

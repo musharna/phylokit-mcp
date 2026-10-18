@@ -125,34 +125,113 @@ def rank_models(
     ]
 
 
+# Textbook names IQ-TREE does not use, and the IQ-TREE model each one means.
+# HKY85 and F81 estimate base frequencies; IQ-TREE's bare "HKY" and "F81" are
+# scored by model_finder with EQUAL frequencies (measured: bare F81 has the
+# log-likelihood and parameter count of JC), so HKY85 is "HKY+F". Bare "F81" is
+# an IQ-TREE name in its own right and is not rewritten; the same-likelihood
+# warning in `restrict_models` is what flags it.
+TEXTBOOK_NAMES = {"JC69": "JC", "K80": "K2P", "HKY85": "HKY+F"}
+
+
+def restrict_models(
+    model_stats: dict, models: list[str]
+) -> tuple[dict, dict[str, str], list[dict]]:
+    """`model_stats` cut down to the named models.
+
+    Returns the subset, the textbook names that were resolved to IQ-TREE names,
+    and warnings for requested models that are the same model under two names
+    (identical log-likelihood and parameter count). An unknown name is refused
+    with the names that were compared, never dropped: a silently shorter set
+    would rank the survivors as if the missing model had lost.
+    """
+    if not models:
+        raise ValueError("models is empty; omit it to rank every model.")
+    by_name = _stats_by_name(model_stats)
+    resolved = {
+        m: TEXTBOOK_NAMES[m] for m in models if m not in by_name and m in TEXTBOOK_NAMES
+    }
+    wanted = [resolved.get(m, m) for m in models]
+    unknown = [m for m, w in zip(models, wanted) if w not in by_name]
+    if unknown:
+        bases = sorted({n.split("+")[0] for n in by_name})
+        raise ValueError(
+            f"model_finder did not score {unknown}. Use IQ-TREE names with their "
+            f"suffixes, e.g. 'HKY+F', 'F81+F', 'K2P', 'JC', 'GTR+F+G4'. Base names "
+            f"it scored: {bases}."
+        )
+    subset = {w: by_name[w] for w in dict.fromkeys(wanted)}
+    warnings: list[dict] = []
+    seen: dict[tuple, str] = {}
+    for name, stat in subset.items():
+        sig = (getattr(stat, "lnL", None), getattr(stat, "nfp", None))
+        if sig in seen:
+            warnings.append(
+                {
+                    "code": "same_model_two_names",
+                    "message": (
+                        f"{name!r} and {seen[sig]!r} have the same log-likelihood and "
+                        "parameter count: they are one model here. In IQ-TREE a bare "
+                        "'F81' or 'HKY' has equal base frequencies (F81 = JC, HKY = "
+                        "K2P); the textbook F81 and HKY85 are 'F81+F' and 'HKY+F'."
+                    ),
+                    "models": [seen[sig], name],
+                }
+            )
+        else:
+            seen[sig] = name
+    return subset, resolved, warnings
+
+
 def select_model(
     seqs: dict[str, str],
     criterion: str = "AIC",
     seed: int = 1,
     top_n: int = 5,
     moltype: str = "dna",
+    models: list[str] | None = None,
 ) -> dict:
-    """Rank substitution models, and say how much the winner actually won by."""
+    """Rank substitution models, and say how much the winner actually won by.
+
+    With `models`, the ranking, deltas, ties and per-criterion winners are all
+    computed within that set, from the same model_finder run.
+    """
     from .alignment import to_cogent3
 
+    if models is not None and not models:
+        raise ValueError("models is empty; omit it to rank every model.")
     n_sites = len(next(iter(seqs.values())))
     result = piqtree().model_finder(to_cogent3(seqs, moltype), rand_seed=seed)
-    ranked = rank_models(result.model_stats, n_sites, criterion)
+    stats = result.model_stats
+    resolved: dict[str, str] = {}
+    warnings: list[dict] = []
+    if models is not None:
+        stats, resolved, warnings = restrict_models(stats, models)
+    ranked = rank_models(stats, n_sites, criterion)
     if not ranked:
         raise RuntimeError("model_finder returned no scoreable models.")
 
     ties = [m for m in ranked[1:] if m.delta <= DELTA_INDISTINGUISHABLE]
-    best_by = {c: rank_models(result.model_stats, n_sites, c)[0].name for c in CRITERIA}
-    return {
+    best_by = {c: rank_models(stats, n_sites, c)[0].name for c in CRITERIA}
+    out = {
         "criterion": criterion,
         "best_model": ranked[0].name,
         "n_models_compared": len(ranked),
-        "ranking": [m.as_dict() for m in ranked[: max(1, top_n)]],
+        # A named set is returned whole: it was asked for model by model.
+        "ranking": [
+            m.as_dict()
+            for m in (ranked if models is not None else ranked[: max(1, top_n)])
+        ],
         "indistinguishable_from_best": [m.name for m in ties],
         "best_by_criterion": best_by,
         "criteria_agree": len(set(best_by.values())) == 1,
         "seed": seed,
     }
+    if models is not None:
+        out["restricted_to"] = list(stats)
+        out["resolved_names"] = resolved
+        out["model_warnings"] = warnings
+    return out
 
 
 # piqtree's own classification of a substitution model, mapped onto this
