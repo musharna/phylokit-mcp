@@ -47,6 +47,14 @@ CATEGORIES = [
 B = 10_000
 SEED = 20261016
 PAIRS = [("alt", "mcp"), ("read", "alt"), ("read", "mcp")]
+# The kinds of question the read control (Read only, nothing to compute with)
+# did NOT solve by hand. Chosen AFTER the read arm ran, from its per-kind
+# results: on RF distance, JC69 distance and homology it worked the answer out
+# from the file (splits listed, differences counted, flanking motifs matched),
+# so those kinds cannot separate a tool from no tool. A post-hoc subset, and
+# labelled as one wherever it is reported.
+NEEDS_COMPUTE = ("sister_taxon", "model_selection", "informative_sites")
+SUBSET = "needs_compute"
 
 
 def sign_test(b: int, c: int) -> float:
@@ -130,6 +138,20 @@ def arm_rows(
             tool_calls_mean=float(np.mean([len(r["tool_calls"]) for r in mine])),
         )
         out.append(row)
+        # No subset row on results that hold none of its kinds (it is undefined).
+        sq = sorted({r["qid"] for r in mine if r["category"] in NEEDS_COMPUTE})
+        if sq:
+            srow = _tally("arm_x_subset", arm, SUBSET, [r for q in sq for r in by_q[q]])
+            srow.update(
+                accuracy=acc(sq),
+                accuracy_ci=bootstrap(sq, acc, rng),
+                questions=len(sq),
+                questions_right_every_run=sum(all(map(_ok, by_q[q])) for q in sq),
+                questions_right_every_run_ci=tuple(
+                    len(sq) * x for x in bootstrap(sq, all_right, rng)
+                ),
+            )
+            out.append(srow)
         for cat in CATEGORIES:
             sub = [r for r in mine if r["category"] == cat]
             if sub:
@@ -199,60 +221,67 @@ def paired_rows(
 ) -> list[dict[str, Any]]:
     out = []
     arms = {r["arm"] for r in rows}
-    for a, b in PAIRS:
-        if a not in arms or b not in arms:
-            continue
-        qa: dict[str, list[dict[str, Any]]] = {}
-        qb: dict[str, list[dict[str, Any]]] = {}
-        for r in rows:
-            if r["arm"] == a:
-                qa.setdefault(r["qid"], []).append(r)
-            elif r["arm"] == b:
-                qb.setdefault(r["qid"], []).append(r)
-        qids = sorted(set(qa) & set(qb))
-        ra = {q: all(map(_ok, qa[q])) for q in qids}
-        rb = {q: all(map(_ok, qb[q])) for q in qids}
-        a_only = sum(ra[q] and not rb[q] for q in qids)
-        b_only = sum(rb[q] and not ra[q] for q in qids)
+    cat = {r["qid"]: r["category"] for r in rows}
+    for subset in ("all", SUBSET):
+        for a, b in PAIRS:
+            if a not in arms or b not in arms:
+                continue
+            qa: dict[str, list[dict[str, Any]]] = {}
+            qb: dict[str, list[dict[str, Any]]] = {}
+            for r in rows:
+                if r["arm"] == a:
+                    qa.setdefault(r["qid"], []).append(r)
+                elif r["arm"] == b:
+                    qb.setdefault(r["qid"], []).append(r)
+            qids = sorted(set(qa) & set(qb))
+            if subset == SUBSET:
+                qids = [q for q in qids if cat[q] in NEEDS_COMPUTE]
+                if not qids:
+                    continue
+            ra = {q: all(map(_ok, qa[q])) for q in qids}
+            rb = {q: all(map(_ok, qb[q])) for q in qids}
+            a_only = sum(ra[q] and not rb[q] for q in qids)
+            b_only = sum(rb[q] and not ra[q] for q in qids)
 
-        def ratio(key: str, qa: dict = qa, qb: dict = qb) -> Any:
-            def f(qs: list[str]) -> float:
-                logs = [
-                    math.log(
-                        np.median([r[key] for r in qb[q]])
-                        / np.median([r[key] for r in qa[q]])
-                    )
-                    for q in qs
-                ]
-                return math.exp(float(np.mean(logs)))
+            def ratio(key: str, qa: dict = qa, qb: dict = qb) -> Any:
+                def f(qs: list[str]) -> float:
+                    logs = [
+                        math.log(
+                            np.median([r[key] for r in qb[q]])
+                            / np.median([r[key] for r in qa[q]])
+                        )
+                        for q in qs
+                    ]
+                    return math.exp(float(np.mean(logs)))
 
-            return f
+                return f
 
-        slower = sum(
-            np.median([r["seconds"] for r in qb[q]])
-            > np.median([r["seconds"] for r in qa[q]])
-            for q in qids
-        )
-        out.append(
-            {
-                "a": a,
-                "b": b,
-                "questions": len(qids),
-                "a_right_every_run": sum(ra.values()),
-                "b_right_every_run": sum(rb.values()),
-                "both": sum(ra[q] and rb[q] for q in qids),
-                "a_only": a_only,
-                "b_only": b_only,
-                "neither": sum(not ra[q] and not rb[q] for q in qids),
-                "sign_test_p": sign_test(a_only, b_only),
-                "seconds_ratio_b_over_a": ratio("seconds")(qids),
-                "seconds_ratio_ci": bootstrap(qids, ratio("seconds"), rng),
-                "questions_b_slower": slower,
-                "seconds_sign_test_p": sign_test(slower, len(qids) - slower),
-                "cost_ratio_b_over_a": ratio("cost_usd")(qids),
-                "cost_ratio_ci": bootstrap(qids, ratio("cost_usd"), rng),
-            }
-        )
+            slower = sum(
+                np.median([r["seconds"] for r in qb[q]])
+                > np.median([r["seconds"] for r in qa[q]])
+                for q in qids
+            )
+            out.append(
+                {
+                    "a": a,
+                    "b": b,
+                    "subset": subset,
+                    "questions": len(qids),
+                    "a_right_every_run": sum(ra.values()),
+                    "b_right_every_run": sum(rb.values()),
+                    "both": sum(ra[q] and rb[q] for q in qids),
+                    "a_only": a_only,
+                    "b_only": b_only,
+                    "neither": sum(not ra[q] and not rb[q] for q in qids),
+                    "sign_test_p": sign_test(a_only, b_only),
+                    "seconds_ratio_b_over_a": ratio("seconds")(qids),
+                    "seconds_ratio_ci": bootstrap(qids, ratio("seconds"), rng),
+                    "questions_b_slower": slower,
+                    "seconds_sign_test_p": sign_test(slower, len(qids) - slower),
+                    "cost_ratio_b_over_a": ratio("cost_usd")(qids),
+                    "cost_ratio_ci": bootstrap(qids, ratio("cost_usd"), rng),
+                }
+            )
     return out
 
 
@@ -293,15 +322,15 @@ def main(argv: list[str]) -> None:
     write_tsv(outdir / "paired.tsv", paired)
     write_tsv(outdir / "baselines.tsv", base)
     for r in summary:
-        if r["level"] in ("arm", "baseline"):
+        if r["level"] in ("arm", "arm_x_subset", "baseline"):
             lo, hi = r["accuracy_ci"]
             print(
-                f"{r['level']:8} {r['arm']:38} {r['right']:>3}/{r['n']:<3} "
+                f"{r['level']:12} {r['arm']:38} {r['category']:13} {r['right']:>3}/{r['n']:<3} "
                 f"{r['accuracy']:.3f} [{lo:.3f}, {hi:.3f}] invalid={r['invalid']}"
             )
     for p in paired:
         print(
-            f"{p['b']} vs {p['a']}: right every run {p['b_right_every_run']} vs "
+            f"[{p['subset']}] {p['b']} vs {p['a']}: right every run {p['b_right_every_run']} vs "
             f"{p['a_right_every_run']} of {p['questions']}, discordant {p['b_only']}:{p['a_only']}, "
             f"p={p['sign_test_p']:.3g}; seconds x{p['seconds_ratio_b_over_a']:.2f} "
             f"{tuple(round(x, 2) for x in p['seconds_ratio_ci'])}; cost "

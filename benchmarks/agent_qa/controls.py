@@ -14,8 +14,10 @@
     residue number, or the same relative position, for homology; the
     uncorrected p-distance for JC69 distances; variable sites for
     parsimony-informative sites; a base-composition test plus a transition
-    share rule for model choice. Robinson-Foulds questions have no shortcut
-    here (two 30-50-tip Newick strings), only the constant.
+    share rule for model choice; for homology, matching the residue's +-6
+    flanking motif in the other sequence (no alignment); for Robinson-Foulds,
+    comparing the bracketed groups of the two strings as written (rooted
+    clusters), the route a reader would take by hand.
 
 Like ``truth.py``, this imports no ``phylokit_mcp``, cogent3 or piqtree.
 """
@@ -147,6 +149,66 @@ def same_relative_position(q: dict[str, Any]) -> str:
     return str(round(pos * len(seqs[dst]) / len(seqs[src])))
 
 
+# Half-width of the flanking window. The asked residue has no gap in either
+# sequence within 6 columns (build_questions.py), so +-6 is the widest context
+# guaranteed to be gap-free; fixed before the rule was run.
+_FLANK = 6
+
+
+def flanking_motif(q: dict[str, Any]) -> str:
+    """No alignment: take the 2k+1 residues centred on the asked one, slide
+    them along the other sequence, and answer the centre of the window with
+    the fewest mismatches (ties: the one nearest the same relative position)."""
+    dst, pos, src = _homology_ask(q)
+    seqs = read_fasta(q["files"]["sequences.fasta"])
+    a, b = seqs[src], seqs[dst]
+    i = pos - 1
+    lo, hi = max(0, i - _FLANK), min(len(a), i + _FLANK + 1)
+    probe, off = a[lo:hi], i - lo
+    guess = pos * len(b) / len(a)
+    best: tuple[int, float, int] | None = None
+    for start in range(len(b) - len(probe) + 1):
+        mism = sum(
+            x != y for x, y in zip(probe, b[start : start + len(probe)], strict=True)
+        )
+        centre = start + off + 1
+        key = (mism, abs(centre - guess), centre)
+        if best is None or key < best:
+            best = key
+    assert best is not None
+    return str(best[2])
+
+
+def _clusters(newick: str) -> set[frozenset[str]]:
+    """Tip sets of the parenthesised groups as written (rooted clusters),
+    leaving out the whole tree and single tips."""
+    stack: list[set[str]] = []
+    out: set[frozenset[str]] = set()
+    every: set[str] = set()
+    for tok in re.findall(r"\(|\)|[A-Za-z_][A-Za-z0-9_.]*", newick.split(";")[0]):
+        if tok == "(":
+            stack.append(set())
+        elif tok == ")":
+            group = stack.pop()
+            out.add(frozenset(group))
+            if stack:
+                stack[-1] |= group
+        else:
+            every.add(tok)
+            if stack:
+                stack[-1].add(tok)
+    return {c for c in out if 1 < len(c) < len(every)}
+
+
+def rf_on_groups_as_written(q: dict[str, Any]) -> str:
+    """The by-hand route: compare the bracketed groups of the two strings as
+    written, as if both were rooted where they are written. Equal to the
+    unrooted RF only when both strings happen to be rooted alike."""
+    a, b = (ln for ln in q["files"]["trees.nwk"].splitlines() if ln.strip())
+    ca, cb = _clusters(a), _clusters(b)
+    return str(len(ca ^ cb))
+
+
 def uncorrected_p(q: dict[str, Any]) -> str:
     a, b = _ask(r"distance between (t\d+) and (t\d+),", q["question"])
     seqs = read_fasta(q["files"]["alignment.fasta"])
@@ -191,6 +253,8 @@ SHORTCUTS: dict[str, tuple[str, Callable[[dict[str, Any]], str]]] = {
     "neighbour-joining cherry partner": ("sister_taxon", nj_cherry_partner),
     "same residue number": ("homologous_position", same_residue_number),
     "same relative position": ("homologous_position", same_relative_position),
+    "flanking-motif match (+-6, no alignment)": ("homologous_position", flanking_motif),
+    "RF on the bracketed groups as written": ("rf_distance", rf_on_groups_as_written),
     "uncorrected p-distance": ("pairwise_distance", uncorrected_p),
     "variable sites": ("informative_sites", variable_sites),
     "composition test + transition share": ("model_selection", composition_and_ts_rule),

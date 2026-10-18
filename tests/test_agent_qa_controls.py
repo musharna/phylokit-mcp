@@ -64,8 +64,11 @@ def test_the_oracle_check_names_a_question_whose_key_disagrees_with_the_scorer()
 def test_the_baselines_on_the_frozen_key() -> None:
     """The numbers the README quotes. Same residue number and variable sites
     get none by construction (the asked residue is >= 5 positions off, and
-    every alignment has constant-but-two-state columns); the shortcuts that do
-    score show the data can carry the answer, not that a reader can get it."""
+    every alignment has constant-but-two-state columns). The flanking motif
+    solves 5 of 6 homology questions with no alignment at all: the no-gap
+    margin that makes the key certain also makes the residue findable by
+    context. RF on the groups as written gets none, since each string is
+    rooted at a random internal node."""
     rows = controls.baselines(_questions())
     right: dict[str, int] = {}
     total: dict[str, int] = {}
@@ -79,6 +82,8 @@ def test_the_baselines_on_the_frozen_key() -> None:
         "neighbour-joining cherry partner": 5,
         "same residue number": 0,
         "same relative position": 0,
+        "flanking-motif match (+-6, no alignment)": 5,
+        "RF on the bracketed groups as written": 0,
         "uncorrected p-distance": 3,
         "variable sites": 0,
         "composition test + transition share": 5,
@@ -290,3 +295,38 @@ def test_an_invalid_row_counts_as_not_right_and_pairs_are_compared_per_question(
     assert p["sign_test_p"] == 0.5
     assert abs(p["seconds_ratio_b_over_a"] - 4.0) < 1e-9
     assert p["questions_b_slower"] == 10 and p["seconds_sign_test_p"] == 2 / 1024
+
+
+def test_the_needs_compute_subset_keeps_only_its_kinds_and_pairs_on_them() -> None:
+    """The post-hoc subset (sister, model, informative sites) is scored on its
+    own questions: here read misses both rf questions (outside the subset) and
+    one of the two sister questions, so the subset row shows 1 of 2 questions,
+    not 1 of 4, and the paired subset row compares the 2 sister questions only."""
+    rows = []
+    for i, cat in enumerate(
+        ["rf_distance", "rf_distance", "sister_taxon", "sister_taxon"]
+    ):
+        for rep in (1, 2):
+            rows.append({**_row("alt", f"q{i}", rep, "right"), "category": cat})
+            verdict = "right" if i == 2 else "wrong"
+            rows.append({**_row("read", f"q{i}", rep, verdict), "category": cat})
+    rng = np.random.default_rng(3)
+    sub = {
+        r["arm"]: r for r in analyze.arm_rows(rows, rng) if r["level"] == "arm_x_subset"
+    }
+    assert (sub["read"]["right"], sub["read"]["n"], sub["read"]["questions"]) == (
+        2,
+        4,
+        2,
+    )
+    assert sub["read"]["questions_right_every_run"] == 1
+    assert sub["read"]["category"] == "needs_compute"
+    assert sub["alt"]["accuracy"] == 1.0
+    by = {p["subset"]: p for p in analyze.paired_rows(rows, rng)}
+    assert (by["all"]["questions"], by["all"]["b_only"]) == (4, 3)
+    assert (by["needs_compute"]["questions"], by["needs_compute"]["b_only"]) == (2, 1)
+    # Results with none of the subset's kinds get no subset row (no division by 0).
+    rf_only = [r for r in rows if r["category"] == "rf_distance"]
+    assert not [
+        r for r in analyze.arm_rows(rf_only, rng) if r["level"] == "arm_x_subset"
+    ]

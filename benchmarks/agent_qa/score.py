@@ -18,7 +18,7 @@ Rules by category, and why each is as strict as it is:
 - ``rf_distance``, ``informative_sites``: the integer, exactly. Both are
   deterministic functions of the text in the question.
 - ``homologous_position``: the integer, exactly. Positions were chosen with no
-  gap in any sequence within 8 columns, and MAFFT agrees with the true
+  gap in either sequence within 6 columns, and MAFFT agrees with the true
   alignment on every one, so the homology is not in doubt.
 - ``model_selection``: any name of the right model (``aliases`` in the key
   lists every name of all four; IQ-TREE writes HKY85 as ``HKY+F`` and F81 as

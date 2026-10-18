@@ -118,21 +118,28 @@ ggsave(file.path(outdir, "agent_qa.png"), p1, width = 11, height = 1.8 + 0.7 * l
 # Figure 2: accuracy with bootstrap 95% intervals over questions, Claude setups
 # (filled) beside the no-LLM baselines (hollow), each on the questions it
 # applies to.
-acc <- s[s$level %in% c("arm", "baseline"), ]
+# The subset rows (analyze.py NEEDS_COMPUTE) are the kinds the Read-only
+# control did not solve by hand, chosen after it ran: labelled post hoc.
+acc <- s[s$level %in% c("arm", "arm_x_subset", "baseline"), ]
+acc <- acc[order(match(acc$level, c("arm", "arm_x_subset", "baseline"))), ]
 acc$label <- ifelse(
-  acc$level == "arm", unname(all_arm_labels[acc$arm]),
-  sprintf("Baseline: %s (%s, %d q.)", acc$arm,
-    ifelse(acc$category == "all", "all kinds", unname(cat_labels[acc$category])), acc$questions)
+  acc$level == "arm", sprintf("%s (all %d q.)", unname(all_arm_labels[acc$arm]), acc$questions),
+  ifelse(acc$level == "arm_x_subset",
+    sprintf("%s (sister, model, informative sites: %d q., post hoc)", unname(all_arm_labels[acc$arm]), acc$questions),
+    sprintf("Baseline: %s (%s, %d q.)", acc$arm,
+      ifelse(acc$category == "all", "all kinds", unname(cat_labels[acc$category])), acc$questions)
+  )
 )
+stopifnot(!anyDuplicated(acc$label))
 acc$label <- factor(acc$label, levels = rev(acc$label))
-acc$kind <- ifelse(acc$level == "arm", "Claude setup (all answers)", "No-LLM baseline (one answer per question)")
+acc$kind <- ifelse(acc$level == "baseline", "No-LLM baseline (one answer per question)", "Claude setup (all answers)")
 p_acc <- ggplot(acc, aes(x = accuracy, y = label)) +
   geom_errorbar(aes(xmin = accuracy_ci_lo, xmax = accuracy_ci_hi), orientation = "y", width = 0.25, colour = phylokit_ink) +
   geom_point(aes(shape = kind), size = 3, fill = phylokit_ink, colour = phylokit_ink, stroke = 0.9) +
   scale_shape_manual(values = c(21, 1), name = NULL) +
   scale_x_continuous(labels = scales::percent, limits = c(0, 1)) +
   labs(
-    x = "Share right (invalid rows count as not right). Bars: bootstrap 95% interval over questions",
+    x = "Share right (invalid rows count as not right).\nBars: bootstrap 95% interval over questions",
     y = NULL, title = "Accuracy of each setup beside what a fixed guess or a shortcut gets",
     subtitle = paste0(
       setup_note, "\nBaselines are scored by the same scorer on the same data files; the best constant ",

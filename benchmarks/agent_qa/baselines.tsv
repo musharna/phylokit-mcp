@@ -61,6 +61,18 @@ same relative position	homologous_position	q15	411	wrong
 same relative position	homologous_position	q16	332	wrong
 same relative position	homologous_position	q17	610	wrong
 same relative position	homologous_position	q18	178	wrong
+flanking-motif match (+-6, no alignment)	homologous_position	q13	338	right
+flanking-motif match (+-6, no alignment)	homologous_position	q14	366	right
+flanking-motif match (+-6, no alignment)	homologous_position	q15	403	right
+flanking-motif match (+-6, no alignment)	homologous_position	q16	330	right
+flanking-motif match (+-6, no alignment)	homologous_position	q17	542	wrong
+flanking-motif match (+-6, no alignment)	homologous_position	q18	172	right
+RF on the bracketed groups as written	rf_distance	q07	12	wrong
+RF on the bracketed groups as written	rf_distance	q08	35	wrong
+RF on the bracketed groups as written	rf_distance	q09	36	wrong
+RF on the bracketed groups as written	rf_distance	q10	27	wrong
+RF on the bracketed groups as written	rf_distance	q11	34	wrong
+RF on the bracketed groups as written	rf_distance	q12	40	wrong
 uncorrected p-distance	pairwise_distance	q27	0.3290	wrong
 uncorrected p-distance	pairwise_distance	q28	0.0670	right
 uncorrected p-distance	pairwise_distance	q29	0.4550	wrong

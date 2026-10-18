@@ -2,10 +2,13 @@
 
 Does Claude answer phylogenetics questions better with phylokit-mcp than
 without it? 38 questions, asked 3 times each to Claude Opus 5.5 in Claude Code
-under three setups:
+under four setups:
 
 - **Claude alone**: no tools. The data are in a file it cannot open, so the
   right reply is `UNKNOWN`. It is the floor, not a competitor.
+- **Claude + Read only (control)**: it can see every byte of the data file and
+  has nothing to compute with: no shell, no server, no web. It tests whether
+  the questions need computation at all.
 - **Claude + Python, MAFFT, web**: what a user has without this server. Bash,
   Read, WebSearch and WebFetch, a Python with piqtree (IQ-TREE 3), cogent3 and
   numpy (the server's own locked versions, but not the server), and MAFFT on
@@ -14,34 +17,103 @@ under three setups:
   MAFFT on `PATH`. It needs Read because the server takes sequences as a
   string, not a file path.
 
-The comparison that matters is the second against the third: the same engine
+The comparison that matters is the third against the fourth: the same engine
 (IQ-TREE 3 through piqtree, MAFFT) driven by Claude from a shell, or through
 the server.
 
-TODO: run date and Claude Code version (the full sweep has not run yet).
+Run 2026-10-16 (Claude alone, Python, phylokit-mcp) and 2026-10-16/17 (Read
+only), Claude Code 2.1.302, model `claude-opus-5-5`.
 
 ![Right, wrong or declined per setup](agent_qa.png)
 
-| Setup | Right | Wrong | Declined | Questions right in all 3 runs | Cost / answer, median (mean) | Seconds / answer, median (mean) | Slowest |
-|---|---|---|---|---|---|---|---|
-| Claude alone | TODO | TODO | TODO | TODO of 38 | TODO | TODO | TODO |
-| Claude + Python, MAFFT, web | TODO | TODO | TODO | TODO of 38 | TODO | TODO | TODO |
-| Claude + phylokit-mcp | TODO | TODO | TODO | TODO of 38 | TODO | TODO | TODO |
+| Setup | Right | Wrong | Declined | Invalid | Questions right in all 3 runs | Cost / answer, median (mean) | Seconds / answer, median (mean) | Slowest |
+|---|---|---|---|---|---|---|---|---|
+| Claude alone | 0 | 0 | 114 | 0 | 0 of 38 | $0.012 ($0.012) | 5.4 (5.8) | 11 s |
+| Claude + Read only (control) | 76 | 24 | 12 | 2 | 21 of 38 | $0.18 ($0.27) | 34.5 (79.2) | 1688 s |
+| Claude + Python, MAFFT, web | 113 | 0 | 0 | 1 | 37 of 38 | $0.029 ($0.030) | 13.3 (15.6) | 43 s |
+| Claude + phylokit-mcp | 110 | 4 | 0 | 0 | 36 of 38 | $0.55 ($0.55) | 112.2 (133.7) | 663 s |
 
 Out of 114 answers per setup. The three runs of a question are not
-independent, so the questions column is the fairer count. The numbers come
-from [`summary.tsv`](summary.tsv), which `plot.R` writes from
-[`results.jsonl`](results.jsonl).
+independent, so the questions column is the fairer count. An invalid row
+counts as not right, whatever its reply scored. The numbers come from
+[`summary.tsv`](summary.tsv) and [`paired.tsv`](paired.tsv), which
+`analyze.py` writes from [`results.jsonl`](results.jsonl) and
+[`results_read.jsonl`](results_read.jsonl); 95% intervals are bootstrap over
+questions.
 
 ## What it shows
 
-TODO after the sweep. Check before writing: per-question counts, not only
-totals; medians beside means; and for any label put on a wrong answer, the
-transcript that shows it.
+- **The server does not make Claude more accurate than a Python shell with
+  the same libraries.** 36 of 38 questions right in every run with the server,
+  37 of 38 with Python. They disagree on 3 questions, 2 for Python and 1 for
+  the server (exact sign test p = 1). Accuracy over answers: 0.965 (95% CI
+  0.90-1.00) with the server, 0.991 (0.97-1.00) with Python.
+- **The server is slower and dearer.** Per question it took 6.0x as long (95%
+  CI 4.4-8.3) and cost 14.4x as much (9.9-20.2) as the Python shell.
+- **The server's 4 wrong answers are all homology, and all counting slips
+  after the alignment.** `align_sequences` returns the alignment; the model
+  then counted residues along the aligned rows by hand, and said so in each
+  reply: 337 and 339 against a key of 338 (q13), and 356 against 366 (q14).
+  The server has no tool that maps a residue to its column, so this step is
+  left to the model.
+- **Tools help over reading alone where the question needs computation.**
+  Right in every run: 37 (Python) and 36 (server) of 38, against 21 for Read
+  only; discordant 16:0 (p = 3e-5) and 16:1 (p = 3e-4).
+- **Python's one invalid row** printed a traceback naming the alt
+  environment's path, which then sat inside the benchmark directory (q10,
+  run 2); the answer was right but is counted as not right.
+
+![Accuracy beside the no-LLM baselines](agent_qa_accuracy.png)
+
+![Right, wrong or declined by kind of question](agent_qa_by_category.png)
 
 ![Cost and time per answer, every run](agent_qa_cost_time.png)
 
-![Right, wrong or declined by kind of question](agent_qa_by_category.png)
+## Limitation: half the kinds of question are solvable by reading
+
+Version 2 was built so that the inputs would be past what can be worked by
+eye. The Read-only control shows that held for three kinds of question and
+not for the other three:
+
+| Kind | Read only: right / 18 (24 for model) | Questions right in all 3 runs | How it got there (from its replies) |
+|---|---|---|---|
+| JC69 distance | 18 | 6 of 6 | counted differences in blocks of 10, applied the JC69 formula |
+| RF distance | 17 | 5 of 6 | listed every split of both trees by hand |
+| Homologous residue | 16 | 4 of 6 | matched the flanking motif in the other sequence, no alignment |
+| Sister taxon | 11 (2 invalid) | 3 of 6 | |
+| Model with lowest BIC | 11 | 3 of 8 | base composition plus a transition share counted on a sample |
+| Parsimony-informative sites | 3 (12 declined) | 0 of 6 | |
+
+On distance, RF and homology, a model with no tools gets almost every
+answer, so those 18 questions cannot show a difference between a tool and no
+tool. The no-LLM baselines point the same way: matching the residue's +-6
+flanking motif (no alignment) gets 5 of 6 homology questions, because the
+no-gap margin that makes the key certain also makes the residue findable by
+its context. The distance tolerance (3 SDs of the estimate) admits a careful
+hand count.
+
+On the other three kinds (20 questions, a subset chosen **after** the Read
+control ran, so post hoc):
+
+| Setup | Right / 60 | 95% CI | Questions right in all 3 runs |
+|---|---|---|---|
+| Claude alone | 0 | 0.00-0.00 | 0 of 20 |
+| Claude + Read only | 25 | 0.23-0.60 | 6 of 20 |
+| Claude + Python, MAFFT, web | 60 | 1.00-1.00 | 20 of 20 |
+| Claude + phylokit-mcp | 60 | 1.00-1.00 | 20 of 20 |
+
+There the tools separate cleanly from reading (14:0 discordant questions
+for each, p = 1.2e-4), and the server and Python still tie. On this subset the
+server took 11.9x as long (95% CI 8.9-15.6) and cost 32x as much (27-39) as
+Python.
+
+The Read control's 2 invalid rows (q01 and q02, run 1) are a harness fault,
+not the model's: the first launch put run directories under a path that
+names the server and the benchmark, so every Read of the data file tripped
+the leak rule. The launch was stopped after those two runs and restarted
+with run directories in the system temp dir. By the one rule for every
+setup the two rows stay in and count as not right, which costs Read only one
+right answer (q02). Over valid rows alone it scores 0.679.
 
 ## Why version 2
 
@@ -49,9 +121,11 @@ Version 1 put 6-8-taxon data in the prompt. In a partial sweep (87 of 414
 runs), Claude with no tools answered 28 of 30 right, including every sister
 taxon, RF and homologous-residue question: the inputs were small enough to
 work by eye, so the sweep said nothing about the server. Version 2 scales the
-inputs past that (16-24 taxa and 800-1200 sites, 30-50-tip trees, ten
-indel-rich sequences of 300-700 residues) and gives them as files only. A test
-checks that no question carries its data in the prompt.
+inputs (16-24 taxa and 800-1200 sites, 30-50-tip trees, ten indel-rich
+sequences of 300-700 residues) and gives them as files only. A test checks
+that no question carries its data in the prompt. The Read control above
+shows the scaling was enough for three kinds and not for RF, distance and
+homology.
 
 ## What it does not show
 
@@ -130,7 +204,19 @@ A wrong answer that is still a legitimate option (a taxon in the alignment,
 one of the four models) is also flagged `wrong_id`. Each row also records,
 read from the transcript, whether any tool call named `phylokit` or the
 benchmark's key file (`mentions_phylokit`, `mentions_key`).
-Tests: `tests/test_agent_qa_score.py`.
+
+One validity rule for every setup (`run.py`'s `validity`): the run exited 0
+with a result, its tools were exactly the setup's, a setup with tools made at
+least one call, and no tool input or output touched the key, the benchmark's
+code, its transcripts or another run's directory. Invalid rows are kept and
+reported, never retried.
+
+`controls.py` holds the positive control (the key scores right, known-wrong
+answers score wrong, checked before any run) and the no-LLM baselines: the
+best constant per kind, chosen with the key (an upper bound), and one
+shortcut per kind that a reader without tools could take. They are in
+[`baselines.tsv`](baselines.tsv). Tests: `tests/test_agent_qa_score.py`,
+`tests/test_agent_qa_controls.py`.
 
 ## Reproduce
 
@@ -139,15 +225,20 @@ export MAFFT=/path/to/mafft                                 # if MAFFT is not on
 uv run python benchmarks/agent_qa/build_questions.py        # rebuild the key (writes questions.json)
 uv run python benchmarks/agent_qa/run.py --setup-alt        # once: the alt arm's Python, without the server
 uv run python benchmarks/agent_qa/run.py --reps 3 --workers 2   # 342 claude -p runs; resumable
-uv run python benchmarks/agent_qa/run.py --rescore          # re-score stored replies after a key fix
-Rscript benchmarks/agent_qa/plot.R                          # summary.tsv + figures
+uv run python benchmarks/agent_qa/run.py --arms read --reps 3 --workers 1 \
+    --results benchmarks/agent_qa/results_read.jsonl        # the Read-only control, 114 runs
+uv run python benchmarks/agent_qa/run.py --rescore          # re-score stored replies (add --results for the read file)
+R=benchmarks/agent_qa/results.jsonl,benchmarks/agent_qa/results_read.jsonl
+uv run python benchmarks/agent_qa/analyze.py $R             # summary.tsv, paired.tsv, baselines.tsv
+Rscript benchmarks/agent_qa/plot.R $R                       # figures
 ```
 
 Each run is an isolated `claude -p`:
-- `--setting-sources ""` and an empty working directory holding only the
-  question's data file.
+- `--setting-sources ""` and an empty working directory in the system temp
+  dir, holding only the question's data file.
 - `--strict-mcp-config`, so no other MCP servers.
 - The same short system prompt in every setup. The user prompt is the same
   apart from the alt arm's one-sentence note on what its shell has.
 
-Raw transcripts go to `runs/`, which is gitignored.
+Raw transcripts go to `~/phylokit-mcp-artifacts/agent_qa/runs/` (or
+`$PHYLOQA_ARTIFACTS`), outside the repo.
