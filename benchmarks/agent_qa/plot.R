@@ -72,10 +72,9 @@ for (a in sa$arm) {
 }
 
 setup_note <- sprintf("Claude Opus 5.5 in Claude Code, %d questions × %d runs.", n_q, n_rep)
-key_note <- paste0(
-  "Answers fixed before any run by the generator: trees drawn at random, sequences evolved\n",
-  "down them; the key never runs the server's code."
-)
+# One line: the figure is shown about 780 px wide in the README, where a
+# longer subtitle wraps and the text has to shrink to fit.
+key_note <- "Answer key fixed before any run."
 # Count labels: white on green and red, dark on the light grey of declined.
 verdict_text <- c(`TRUE` = "grey15", `FALSE` = "white")
 legend_counts <- function(v) {
@@ -104,16 +103,18 @@ p1 <- ggplot(counts, aes(x = share, y = arm_label, fill = verdict)) +
     values = pal_verdict, labels = legend_counts, drop = TRUE,
     name = paste0("Answers (", paste(sub("Claude \\+ |Claude ", "", arm_labels), collapse = " / "), "):")
   ) +
-  guides(fill = guide_legend(title.position = "top", title.hjust = 0.5)) +
+  guides(fill = guide_legend(title.position = "top", title.hjust = 0.5, nrow = 2, byrow = TRUE)) +
   scale_x_continuous(labels = scales::percent, expand = c(0, 0)) +
   labs(
     x = sprintf("Share of %d answers per setup", n_ans), y = NULL,
     title = "Phylogenetics questions: right, wrong, declined or invalid",
-    subtitle = paste0(setup_note, "\n", key_note)
+    subtitle = paste(setup_note, key_note)
   ) +
-  theme_phylokit(base_size = 13) +
-  theme(panel.grid.major.y = element_blank(), plot.margin = margin(8, 24, 8, 8))
-ggsave(file.path(outdir, "agent_qa.png"), p1, width = 11, height = 1.8 + 0.7 * length(arm_labels), dpi = 200, bg = "white")
+  # Sized for a 780 px README display: 10 in at base 15 puts axis and legend
+  # text near 13 px there (11 in at base 13 gave about 10 px).
+  theme_phylokit(base_size = 15) +
+  theme(panel.grid.major.y = element_blank(), plot.margin = margin(8, 24, 8, 8), legend.location = "plot")
+ggsave(file.path(outdir, "agent_qa.png"), p1, width = 10, height = 1.9 + 0.75 * length(arm_labels), dpi = 200, bg = "white")
 
 # Figure 2: accuracy with bootstrap 95% intervals over questions, Claude setups
 # (filled) beside the no-LLM baselines (hollow), each on the questions it

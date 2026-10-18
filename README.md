@@ -1,74 +1,92 @@
 # phylokit-mcp
 
-[![ci](https://github.com/musharna/phylokit-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/musharna/phylokit-mcp/actions/workflows/ci.yml)
+phylokit-mcp is an MCP server that lets AI agents build maximum-likelihood
+trees with IQ-TREE 3 and align sequences with MAFFT.
+
+[![CI](https://img.shields.io/github/actions/workflow/status/musharna/phylokit-mcp/ci.yml?branch=main&label=CI)](https://github.com/musharna/phylokit-mcp/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
-[![python](https://img.shields.io/pypi/pyversions/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
-[![license](https://img.shields.io/pypi/l/phylokit-mcp)](LICENSE)
-[![Glama](https://glama.ai/mcp/servers/musharna/phylokit-mcp/badges/score.svg)](https://glama.ai/mcp/servers/musharna/phylokit-mcp)
+[![Python](https://img.shields.io/pypi/pyversions/phylokit-mcp)](https://pypi.org/project/phylokit-mcp/)
+[![License](https://img.shields.io/pypi/l/phylokit-mcp)](https://github.com/musharna/phylokit-mcp/blob/main/LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21713870.svg)](https://doi.org/10.5281/zenodo.21713870)
+[![Glama](https://glama.ai/mcp/servers/musharna/phylokit-mcp/badges/score.svg)](https://glama.ai/mcp/servers/musharna/phylokit-mcp)
 
 <!-- mcp-name: io.github.musharna/phylokit-mcp -->
 
-Phylogenetic inference over MCP, driving IQ-TREE 3 through
-[piqtree](https://github.com/cogent3/piqtree) 0.8, which builds IQ-TREE 3 into
-its wheel.
-
 **A topology without support is not a result.** `infer_tree` always runs a
-bootstrap and always returns per-clade support. There is no flag to skip it.
-
-7 tools. The test suite runs real IQ-TREE and real MAFFT (no mocked engine),
-and includes 23 mutation checks and a real-process JSON-RPC handshake test.
+bootstrap and returns per-clade support. There is no flag to skip it.
 
 ## Why the rule
 
-A maximum-likelihood tree looks identical whether or not the data support it.
-Measured here, on alignments simulated from a _known_ 7-taxon tree so the right
-answer is not in doubt:
+A maximum-likelihood tree looks the same whether or not the data support it.
+Measured on alignments simulated from a _known_ 7-taxon tree (JC, 100
+replicates, seed 1):
 
-| sites | informative sites | recovered the true tree? | lowest clade support |
+| Sites | Informative sites | Recovered the true tree? | Lowest clade support |
 | ----: | ----------------: | ------------------------ | -------------------: |
 |   300 |                51 | yes, exactly             |                 1.00 |
-|    60 |                11 | **no — RF 2**            |                 0.57 |
+|    60 |                11 | **no, RF 2**             |                 0.57 |
 
 At 60 sites the tree contains a clade (`C,D,G`) that does not exist and omits
 one that does (`E,F,G`). Both runs return a fully resolved Newick string of the
-same shape; nothing about the topology itself distinguishes them. The support
-values do — and the false clade is the _lowest-supported_ one in the tree.
+same shape. Only the support values tell them apart, and the false clade is the
+_lowest-supported_ one in the tree.
 
-That is the entire argument for this server. Returning a bare tree returns a
-result the caller cannot evaluate.
+## Does it help?
+
+Not yet. In our benchmark Claude was no more accurate with this server than
+with a Python shell, and the server cost more. Taking files by path closed most
+of the cost gap, but not all of it.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/musharna/phylokit-mcp/main/benchmarks/agent_qa/agent_qa.png" alt="Bar chart of 114 answers per setup (38 questions, 3 runs each). Claude alone: 114 declined. Read only: 76 right, 24 wrong, 12 declined, 2 invalid. Python, MAFFT and web: 113 right, 1 invalid. phylokit-mcp: 110 right, 4 wrong." width="780">
+</p>
+
+Claude Opus 5.5 answered 38 questions 3 times each. Counting answers, as the
+chart does, the server got 110 of 114 right and a Python shell with piqtree and
+MAFFT got 113; counting questions, 36 of 38 were right in every run against 37
+(sign test p = 1). Per question the server took 6.0 times as long (95% CI 4.4
+to 8.3) and cost 14.4 times as much (9.9 to 20.2), each a geometric mean of
+per-question ratios. Most of that cost was the model pasting the data file
+into tool calls. In a pre-registered re-run of an unreleased commit that takes
+file paths (2026-10-18), the server cost 1.26 times as much (1.04 to 1.55) and
+got 36 of 38 questions right in every run against Python's 35: a tie, not a
+win.
+
+The benchmark does not score support values; method, controls and other
+limitations are in [benchmarks/agent_qa](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md).
 
 ## What it reports that a Newick string cannot
 
-- **Conflicting clades** — groupings the data support at ≥0.70 that are _absent_
-  from the reported tree. A support-annotated Newick string has nowhere to
-  attach these, so the standard format silently drops them.
-- **`fraction_resolved`** — the share of clades clearing 0.70. The headline
-  number, before any individual grouping is repeated as fact.
-- **Model runners-up with ΔAIC** — not just a winner. On the 300-site alignment
+- **Conflicting clades**: groupings the data support at ≥0.70 that are _absent_
+  from the reported tree. A support-annotated Newick string has nowhere to put
+  them.
+- **`fraction_resolved`**: the share of clades clearing 0.70. The headline
+  number, before any single grouping is repeated as fact.
+- **Model runners-up with ΔAIC**, not just a winner. On the 300-site alignment
   above, simulated under **JC**, the AIC winner is **not JC** (TPM2u and TPM2
-  tie at the top), and several other models, JC among them at ΔAIC 0.7, sit
-  inside the conventional ±2 indistinguishability margin (`seed=1`, piqtree
-  0.8.3). A winner without its margin is a claim the numbers do not support.
-- **Length versus evidence** — `n_parsimony_informative` alongside `n_sites`.
-  A 10,000-site alignment of near-identical sequences supports nothing.
+  tie), and several models, JC among them at ΔAIC 0.7, sit inside the
+  conventional ±2 margin (`seed=1`, piqtree 0.8.3).
+- **Length versus evidence**: `n_parsimony_informative` alongside `n_sites`. A
+  10,000-site alignment of near-identical sequences supports nothing.
 
 ## Tools
 
-| tool                        | what it does                                                                       |
+| Tool                        | What it does                                                                       |
 | --------------------------- | ---------------------------------------------------------------------------------- |
-| `infer_tree`                | ML tree **plus** bootstrap support, per clade. Never one without the other.        |
+| `infer_tree`                | ML tree **plus** bootstrap support, per clade.                                     |
 | `select_substitution_model` | Ranks 100+ models with ΔAIC/AICc/BIC, and says when the criteria disagree.         |
 | `compare_trees`             | Robinson–Foulds distance and the clades that differ. Compares splits, not strings. |
-| `simulate_alignment`        | Generates sequences along a tree you specify — the positive control.               |
+| `simulate_alignment`        | Generates sequences along a tree you specify: the positive control.                |
 | `align_sequences`           | Aligns unaligned FASTA with MAFFT; the output goes straight into `infer_tree`.     |
 | `map_positions`             | Maps a residue to its alignment column, and that column to every other sequence.   |
 | `capabilities`              | piqtree and IQ-TREE versions, 215 substitution models, MAFFT version, limits.      |
 
-Every tool that takes FASTA or Newick also takes a file path (`fasta_path`,
-or `trees_path` for a file of two trees), read by the server and capped at
-32 MiB, so a client does not have to paste the file into the call. A relative
-path resolves against the server's working directory.
+Tools that take FASTA or Newick also take a file path (`fasta_path`, or
+`trees_path` for two trees), read by the server; a relative path resolves
+against the server's working directory.
+
+The tests run real IQ-TREE and real MAFFT (no mocked engine), with 23 mutation
+checks and a real-process JSON-RPC handshake test.
 
 ## Install
 
@@ -76,17 +94,11 @@ path resolves against the server's working directory.
 pip install phylokit-mcp
 ```
 
-piqtree ships prebuilt wheels, so there is no compiler, no R and no conda step —
-but it requires **Python 3.12+**, and so does this package.
-
-`align_sequences` is the one tool that needs something pip cannot install: the
-[MAFFT](https://mafft.cbrc.jp/alignment/software/) binary on `PATH`
-(`apt install mafft`, `brew install mafft`, or `conda install -c bioconda mafft`).
-The other tools work without it (`map_positions` needs it only for unaligned input), `capabilities` reports
-`aligner_version: null`, and calling `align_sequences` returns a refusal that
-names the install rather than a crash. A MAFFT that is installed but does not
-answer `--version` is a different state: `aligner_version` is still `null` and
-`aligner_error` says what happened.
+Requires **Python 3.12+**. IQ-TREE 3 comes through
+[piqtree](https://github.com/cogent3/piqtree) 0.8, which builds it into its
+wheel. `align_sequences` also needs the
+[MAFFT](https://mafft.cbrc.jp/alignment/software/) binary on `PATH`, as does
+`map_positions` on unaligned input; the other tools work without it. Details: [docs/INSTALL.md](https://github.com/musharna/phylokit-mcp/blob/main/docs/INSTALL.md).
 
 ## Configure your MCP client
 
@@ -101,82 +113,43 @@ answer `--version` is a different state: `aligner_version` is still `null` and
 }
 ```
 
-`uvx` fetches the released package on demand, so this needs no prior install — but
-it must resolve a **Python 3.12+** interpreter, since that is piqtree's wheel floor.
-If `uvx` picks an older one, pin it with `"args": ["--python", "3.12", "phylokit-mcp"]`.
+If `uvx` picks a Python older than 3.12, use
+`"args": ["--python", "3.12", "phylokit-mcp"]`.
 
-If you installed it yourself instead, `"command": "phylokit-mcp"` works when the
-executable is on your `PATH`; give the absolute path to the entry point in the
-environment you installed into if it is not.
+## Reproducibility
 
-The same file ships as [`.mcp.json`](.mcp.json) in this repo, which Claude Code
-picks up automatically when the repo is your working directory.
-
-## Reproducibility, stated precisely
-
-Measured, not assumed:
-
-- **Not bit-exact, in any setting.** The same request with the same seed — on
-  repeat in one process, or in a fresh process — can return branch lengths and a
-  log-likelihood that differ in the trailing digits (eight fresh processes gave
-  five distinct log-likelihoods, spread ~2e-6). IQ-TREE reads the wall clock
-  during its search: freezing `gettimeofday()` alone made every run
-  bit-identical. piqtree exposes no option to take the clock out, so the server
-  reports `deterministic_across_processes: false` rather than promise it.
-- **Support can move by a replicate flipping.** Over six repeated 50-replicate
-  calls, three of four clades were bit-identical and one moved **0.02**, well
-  inside the bootstrap's own sampling error (~0.07 at 50 replicates). The
-  topology and every conclusion were unchanged. The column resampling itself is
-  numpy-seeded and exact.
-
-Compare trees with `compare_trees`, and numbers with a tolerance — never by
-string equality.
-
-Threads are pinned to 1 before piqtree is imported: likelihood sums accumulate in
-thread-completion order, floating-point addition is not associative, and
-near-tied topologies can flip on the last bits. Pinning is necessary, not
-sufficient.
-
-## Does it help?
-
-We asked Claude Opus 5.5 38 phylogenetics questions, 3 times each, with a Python shell that has piqtree and MAFFT and with this server. The server was not more accurate: 36 of 38 questions right in every run against 37 (sign test p = 1). It was slower and cost more, 6.0x as long (95% CI 4.4 to 8.3) and 14.4x the cost (9.9 to 20.2) per question. A Read-only control got most answers right on half the kinds of question by reading the file alone. Most of that cost was the model pasting the data file into tool calls. In a pre-registered re-run of an unreleased commit (2026-10-18) with file-path inputs and a column-mapping tool, the server cost 1.26 times as much as Python (95% CI 1.04 to 1.55), down from 14.4. It was right on 36 of 38 questions in every run against Python's 35. That is a tie under the rule set beforehand: the server was as accurate, and not cheaper. Method, controls and limitations: [benchmarks/agent_qa](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md).
+Not bit-exact, in any setting: IQ-TREE reads the wall clock during its search,
+so the same request and seed can differ in the trailing digits of branch
+lengths and log-likelihood, and a support value can move by a replicate
+flipping. The server reports `deterministic_across_processes: false`. Compare
+trees with `compare_trees` and numbers with a tolerance, never by string
+equality. Measurements: [docs/REPRODUCIBILITY.md](https://github.com/musharna/phylokit-mcp/blob/main/docs/REPRODUCIBILITY.md).
 
 ## Limitations
 
-- **Nucleotide and protein alignments.** Pass `sequence_type="protein"` and a
-  protein model (`LG`, `WAG`, …). Codon models are still not exposed.
-  The molecule type is **declared, never sniffed**: an alignment of only A/C/G/T
-  is a valid protein alignment too (Ala/Cys/Gly/Thr), so guessing would fit a
-  nucleotide model to protein data and return a tree, a likelihood and support
-  values that are all wrong and none of which complain.
-- **Bootstrap only** — no aLRT, no approximate Bayes, no UFBoot. Support is the
-  nonparametric bootstrap (Felsenstein 1985), computed here rather than read back
-  from IQ-TREE, because piqtree 0.8.3 runs `bootstrap_replicates` but does not
-  expose the resulting values.
-- **Cost is linear in replicates.** Each replicate is a full maximum-likelihood
-  search on a resampled alignment, so it grows with taxon count, alignment
-  length and model complexity. Capped at 200 taxa and 1000 replicates.
-- **Alignment is MAFFT `--auto`, single-threaded, and nothing else.** No choice
-  of strategy, no profile alignment, no trimming, at most 200 sequences of
-  100,000 residues, and a 600 s wall-clock cap. Input that already contains gaps
-  is refused rather than silently degapped. The tree tools still refuse ragged
-  input; they do not align it for you.
-- **Unrooted trees.** No rooting, no dating, no ancestral reconstruction.
+- **Nucleotide and protein, no codon models.** Pass `sequence_type="protein"`
+  and a protein model (`LG`, `WAG`, …). The molecule type is **declared, never
+  sniffed**: an A/C/G/T-only alignment is also valid protein (Ala/Cys/Gly/Thr),
+  and a wrong guess returns a wrong tree, likelihood and support with no
+  warning.
+- **Bootstrap only**: no aLRT, approximate Bayes or UFBoot. Support is the
+  nonparametric bootstrap (Felsenstein 1985), computed here because piqtree
+  0.8.3 runs `bootstrap_replicates` but does not expose the values.
+- **Cost is linear in replicates**, each a full ML search. Capped at 200 taxa
+  and 1000 replicates.
+- **Alignment is MAFFT `--auto`, single-threaded, and nothing else**: no
+  strategy choice, profile alignment or trimming; at most 200 sequences of
+  100,000 residues and 600 s. Gapped input is refused, not degapped. The tree
+  tools refuse ragged input rather than align it.
+- **Unrooted trees.** No rooting, dating or ancestral reconstruction.
 
-## Licence
+## License
 
-**GPL-2.0-only.** The "only" is load-bearing: piqtree declares `GPL-2.0-only`,
-which is _incompatible_ with GPL-3.0, so the distributed combination cannot be
-GPL-3. cogent3 is BSD and imposes nothing.
+**GPL-2.0-only**, because piqtree is `GPL-2.0-only`, which is _incompatible_
+with GPL-3.0. cogent3 is BSD.
 
-Unofficial. Not affiliated with, endorsed by, or sponsored by the IQ-TREE authors
-or the cogent3 project. **IQ-TREE is academic software and expects to be cited**
-— if results from this server appear in published work, cite IQ-TREE 3 as
-directed at [iqtree.org](http://www.iqtree.org/) (currently Wong et al. 2026,
-[doi:10.1093/molbev/msag117](https://doi.org/10.1093/molbev/msag117), plus the
-paper for any method used, such as ModelFinder), and piqtree, McArthur et al.
-2026, [doi:10.1093/molbev/msag061](https://doi.org/10.1093/molbev/msag061) —
-not this wrapper. The same holds for MAFFT when `align_sequences` produced the
-alignment: Katoh & Standley 2013,
-[doi:10.1093/molbev/mst010](https://doi.org/10.1093/molbev/mst010). MAFFT is
-BSD-licensed and is run as a separate program, not linked. See [NOTICE](NOTICE).
+If you publish results from this server, cite IQ-TREE 3, piqtree and (when it
+made the alignment) MAFFT, not this wrapper. The references are in
+[CITATION.cff](https://github.com/musharna/phylokit-mcp/blob/main/CITATION.cff),
+and licensing and affiliation are in
+[NOTICE](https://github.com/musharna/phylokit-mcp/blob/main/NOTICE).
