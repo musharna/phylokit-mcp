@@ -27,7 +27,8 @@ checks and a real-process JSON-RPC handshake test.
 ## Why the rule
 
 A maximum-likelihood tree looks the same whether or not the data support it.
-Measured on alignments simulated from a _known_ 7-taxon tree:
+Measured on alignments simulated from a _known_ 7-taxon tree (JC, 100
+replicates, seed 1):
 
 | sites | informative sites | recovered the true tree? | lowest clade support |
 | ----: | ----------------: | ------------------------ | -------------------: |
@@ -55,7 +56,8 @@ cost 14.4 times as much (9.9 to 20.2), each a geometric mean of per-question
 ratios. A Read-only control got most answers right on half the kinds of
 question by reading the file alone.
 
-Method, controls and limitations: [benchmarks/agent_qa](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md).
+The benchmark does not score support values; method, controls and other
+limitations are in [benchmarks/agent_qa](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md).
 
 ## What it reports that a Newick string cannot
 
