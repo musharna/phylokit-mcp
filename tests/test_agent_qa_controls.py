@@ -568,3 +568,25 @@ def test_a_release_pin_must_install_that_release(monkeypatch: Any) -> None:
         assert "installed '0.6.0'" in str(exc)
     else:
         raise AssertionError("0.6.0 was accepted for ==0.7.0")
+
+
+def test_tiers_main_prints_the_holm_p_the_verdict_was_made_on(
+    tmp_path: Path, capsys: Any
+) -> None:
+    rows = []
+    for i in range(12):
+        for rep in (1, 2, 3):
+            rows.append(_row("alt", f"q{i}", rep, "right" if i < 4 else "wrong"))
+            rows.append(_row("mcp", f"q{i}", rep, "right"))
+    path = tmp_path / "results.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    # 8 discordant questions, all for mcp: raw p = 2/256 = 0.0078; one tier of
+    # two planned, so Holm's factor is 2 (0.0156), and the call is a lift.
+    analyze.tiers_main(f"haiku={path}")
+    out = capsys.readouterr().out
+    assert "raw p=0.00781, Holm p=0.0156" in out and ": LIFT" in out
+    assert "tier rule (PREREG_2026-10-20_model-tiers): PENDING" in out
+    # A full family of two equal tiers: Holm p = 2 * p for both, and a win.
+    analyze.tiers_main(f"haiku={path},sonnet={path}")
+    out = capsys.readouterr().out
+    assert out.count("Holm p=0.0156") == 2 and "): WIN" in out

@@ -115,7 +115,8 @@ for M in haiku sonnet; do
 done
 ```
 
-then `tier_rule` on the two tiers' alt-vs-mcp `paired.tsv` rows.
+then the verdict, `analyze.py --tiers=haiku=$D/haiku/results.jsonl,sonnet=$D/sonnet/results.jsonl`
+(`tier_rule` on full-precision paired rows; it prints the Holm p it decided on).
 
 ## Reporting
 

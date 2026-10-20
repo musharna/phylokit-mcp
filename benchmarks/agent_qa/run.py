@@ -803,6 +803,8 @@ def main() -> None:
     vpath = Path(a.versions or Path(a.results).with_name("versions.json"))
     if vpath.exists():
         old = json.loads(vpath.read_text())
+        # A file from before --model ran the default model.
+        old.setdefault("model", DEFAULT_MODEL)
         same = {k: old.get(k) for k in ("model", "server_spec", "mcp", "alt", "mafft")}
         if same != {k: versions.get(k) for k in same}:
             raise SystemExit(

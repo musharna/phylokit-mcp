@@ -337,6 +337,14 @@ def holm(ps: dict[str, float]) -> dict[str, float]:
     return adj
 
 
+def holm_family(ps: dict[str, float], expected: int = 2) -> dict[str, float]:
+    """Holm over the planned family: missing tiers are padded with p = 1, so a
+    partial family is adjusted as conservatively as the full one could be."""
+    pad = {f"_missing{i}": 1.0 for i in range(expected - len(ps))}
+    adj = holm(ps | pad)
+    return {t: adj[t] for t in ps}
+
+
 def tier_rule(
     tiers: dict[str, dict[str, Any]], expected: int = 2, alpha: float = 0.05
 ) -> tuple[str, dict[str, str]]:
@@ -352,11 +360,7 @@ def tier_rule(
     PENDING (the per-tier calls use the Holm factor of the full family, so a
     lone tier is never judged on its raw p).
     """
-    ps = {t: p["sign_test_p"] for t, p in tiers.items()}
-    # Pad the family to its planned size with p = 1 so a partial family is
-    # adjusted as conservatively as the full one could be at best.
-    pad = {f"_missing{i}": 1.0 for i in range(expected - len(ps))}
-    adj = holm(ps | pad)
+    adj = holm_family({t: p["sign_test_p"] for t, p in tiers.items()}, expected)
     calls: dict[str, str] = {}
     for t, p in tiers.items():
         lo, hi = p["right_every_run_diff_ci"]
@@ -418,31 +422,26 @@ def write_tsv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def read_tier(path: Path) -> dict[str, Any]:
-    """The alt-vs-mcp, all-questions row of a tier's ``paired.tsv``, typed."""
-    with path.open() as fh:
-        (p,) = [
-            r
-            for r in csv.DictReader(fh, delimiter="\t")
-            if (r["a"], r["b"], r["subset"]) == ("alt", "mcp", "all")
-        ]
-    return {
-        "a_only": int(p["a_only"]),
-        "b_only": int(p["b_only"]),
-        "sign_test_p": float(p["sign_test_p"]),
-        "right_every_run_diff_ci": (
-            float(p["right_every_run_diff_ci_lo"]),
-            float(p["right_every_run_diff_ci_hi"]),
-        ),
-    }
+    """A tier's alt-vs-mcp, all-questions paired row, recomputed at full
+    precision from its results.jsonl (paired.tsv rounds to 4 digits). The
+    difference CI has its own seeded generator, so it equals paired.tsv's."""
+    rows = [json.loads(ln) for ln in path.read_text().splitlines()]
+    (p,) = [
+        p
+        for p in paired_rows(rows, np.random.default_rng(SEED), [("alt", "mcp")])
+        if p["subset"] == "all"
+    ]
+    return p
 
 
 def tiers_main(spec: str) -> None:
-    """``--tiers=haiku=<paired.tsv>,sonnet=<paired.tsv>``: Holm and the verdict."""
+    """``--tiers=haiku=<results.jsonl>,sonnet=<results.jsonl>``: Holm and the
+    verdict; the Holm p printed is the one ``tier_rule`` decides on."""
     tiers = {
         name: read_tier(Path(path))
         for name, path in (x.split("=", 1) for x in spec.split(","))
     }
-    adj = holm({t: p["sign_test_p"] for t, p in tiers.items()})
+    adj = holm_family({t: p["sign_test_p"] for t, p in tiers.items()})
     verdict, calls = tier_rule(tiers)
     for t, p in tiers.items():
         print(
