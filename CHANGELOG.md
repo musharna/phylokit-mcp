@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-19
+
 ### Added
 
 - **Agent benchmark** (`benchmarks/agent_qa/`): 38 phylogenetics questions
@@ -20,7 +22,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the Python shell (36 vs 37 of 38 questions right in every run, p = 1), and
   takes 6.0x as long and costs 14.4x as much per question. Read only gets
   most answers right on three of the six kinds by hand. A pre-registered
-  re-run on 2026-10-18 (unreleased 624fc96, file-path inputs) cut the cost
+  re-run on 2026-10-18 (624fc96, file-path inputs) cut the cost
   ratio to 1.26 (95% CI 1.04 to 1.55) at 36 vs 35 questions: a tie.
 - **Work-count perf ratchet** (`benchmarks/perf/`): calls into the package,
   calls into piqtree and MAFFT launches per tool on fixed inputs, compared
