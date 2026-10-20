@@ -129,6 +129,7 @@ def test_the_real_entry_point_completes_an_mcp_handshake():
                 "compare_trees",
                 "simulate_alignment",
                 "align_sequences",
+                "map_positions",
                 "capabilities",
             }
         finally:
@@ -158,6 +159,7 @@ def test_every_tool_is_registered_with_a_schema():
         "compare_trees",
         "simulate_alignment",
         "align_sequences",
+        "map_positions",
         "capabilities",
     }
     for tool in tools:
@@ -251,6 +253,7 @@ def test_build_server_returns_a_fresh_instance_each_call():
         "compare_trees",
         "simulate_alignment",
         "align_sequences",
+        "map_positions",
         "capabilities",
     }
     for srv in (a, b):

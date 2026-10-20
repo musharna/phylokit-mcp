@@ -19,12 +19,43 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `tests/test_agent_qa_score.py`. Result: the server is not more accurate than
   the Python shell (36 vs 37 of 38 questions right in every run, p = 1), and
   takes 6.0x as long and costs 14.4x as much per question. Read only gets
-  most answers right on three of the six kinds by hand.
+  most answers right on three of the six kinds by hand. A pre-registered
+  re-run on 2026-10-18 (unreleased 624fc96, file-path inputs) cut the cost
+  ratio to 1.26 (95% CI 1.04 to 1.55) at 36 vs 35 questions: a tie.
 - **Work-count perf ratchet** (`benchmarks/perf/`): calls into the package,
   calls into piqtree and MAFFT launches per tool on fixed inputs, compared
   exactly with `baseline.json` in CI and in `tests/test_perf_ratchet.py`. A
   rise fails; a drop fails until locked in with `--update`; raising the
   baseline needs `--allow-increase`. Identical on Python 3.12, 3.13 and 3.14.
+- **File-path inputs**: `fasta_path` on `infer_tree`,
+  `select_substitution_model`, `align_sequences` and `map_positions`, and
+  `trees_path` (a file of two trees) on `compare_trees`. Exactly one of the
+  text and the path; the path must be a regular UTF-8 file of at most 32 MiB,
+  and a relative path resolves against the server's working directory, which
+  every refusal names. In the agent benchmark the inline payload was the
+  server arm's cost: a median of 16,000 characters written into tool calls
+  per question.
+- **`map_positions`**: a residue's alignment column, and what every sequence
+  holds there (its residue position, or the residues either side of a gap).
+  `aligned=false` aligns with MAFFT first. All 4 wrong server answers in the
+  agent benchmark were hand counts along an alignment.
+- **`select_substitution_model(models=[...])`**: rank only the named models,
+  all returned. JC69, K80 and HKY85 resolve to IQ-TREE names, and two names
+  for one model (IQ-TREE's bare `F81` is JC) are flagged. The benchmark's
+  server arm asked for `top_n` up to 300 to find four models, 15 KB of output.
+
+### Fixed
+
+- **Concurrent tool calls corrupted the process.** MCPServer runs sync tools
+  in worker threads, and piqtree's engine wrapper chdirs into a temporary
+  directory it deletes and redirects fds 1 and 2 for each call. Two calls in
+  one client turn left the server in a deleted directory, and every later call
+  failed. Tool calls now run one at a time under a process lock
+  (`tests/test_concurrent_calls.py`).
+- **`select_substitution_model` failed outright when ModelFinder's winner was
+  a name piqtree cannot parse** (bare `K3Pu` on 2 of the benchmark's 8 model
+  alignments: "Unknown substitution model"). The statistics are now read from
+  IQ-TREE's raw output, checked equal to piqtree's own where its call works.
 
 ## [0.6.0] — 2026-09-26
 

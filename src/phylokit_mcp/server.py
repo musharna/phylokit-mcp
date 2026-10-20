@@ -1,12 +1,17 @@
-"""MCP server. Five tools over IQ-TREE, and one over MAFFT.
+"""MCP server. Five tools over IQ-TREE, one over MAFFT, and a position mapper.
 
 `engine` is imported FIRST and deliberately: it pins OMP_NUM_THREADS before
 piqtree loads, and IQ-TREE reads that variable when its thread pool initialises.
 Import order here is load-bearing, not incidental.
 
-Tools are synchronous. IQ-TREE holds process-global state and the bootstrap is
-CPU-bound; serialising calls on the event loop keeps concurrent invocations from
-interleaving inside the engine.
+Tools are synchronous, and they run one at a time under `_ENGINE_LOCK`.
+MCPServer runs a sync tool in a worker thread (`anyio.to_thread`), so calls a
+client sends together run concurrently unless something stops them, and
+piqtree's engine wrapper changes process-global state for the length of a call:
+it chdirs into a temporary directory it then deletes, and points file
+descriptors 1 and 2 (stdout is the JSON-RPC stream) at /dev/null. Interleaved,
+two calls left the process in a deleted directory and every later call failed
+(the 2026-10-18 benchmark re-run, three `infer_tree` calls in one turn).
 """
 
 # isort: off  -- engine MUST come before anything that could pull in piqtree.
@@ -17,6 +22,7 @@ from . import engine  # noqa: I001
 # and piqtree ships wheels for 3.12+ only, so this package cannot run on a
 # version where the typing_extensions backport would be required.
 import functools
+import threading
 from typing import Any, NotRequired, TypedDict
 
 # mcp 2.x renamed FastMCP to MCPServer and moved it out of mcp.server.fastmcp,
@@ -27,8 +33,9 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from . import __version__, diagnostics, msa
+from . import __version__, diagnostics, msa, positions
 from . import alignment as aln_mod
+from .inputs import text_or_path
 from .alignment import (
     MOLTYPES,
     AlignmentError,
@@ -90,6 +97,12 @@ refuse ragged input rather than guess. `align_sequences` is the step before
 them: it runs MAFFT on unaligned sequences and returns FASTA that `infer_tree`
 accepts as is. An alignment is an inference too — read its `fraction_gaps` and
 `n_parsimony_informative` before building on it.
+
+Data in a file: pass its path (`fasta_path`, `trees_path`) instead of the text.
+The server reads the file itself, so there is no need to read it first or to
+paste it into the call. `map_positions` answers which residue of one sequence
+shares an alignment column with a residue of another; do not count columns by
+hand.
 """
 
 # snake_case spellings. The camelCase aliases are still accepted as constructor
@@ -161,6 +174,10 @@ class ModelResult(TypedDict):
     seed: int
     alignment: AlignmentDict
     warnings: list[dict[str, Any]]
+    # Only when `models` was given: the IQ-TREE names ranked, and any textbook
+    # name (JC69, K80, HKY85) that was read as one of them.
+    restricted_to: NotRequired[list[str]]
+    resolved_names: NotRequired[dict[str, str]]
 
 
 class SimulationResult(TypedDict):
@@ -181,6 +198,20 @@ class AlignResult(TypedDict):
     input_lengths: dict[str, int]
     engine: dict[str, Any]
     ready_for_infer_tree: bool
+    warnings: list[dict[str, Any]]
+
+
+class PositionsResult(TypedDict):
+    column: int
+    n_columns: int
+    query: dict[str, Any]
+    # Per sequence: its residue position and residue at `column`, or at a gap
+    # position None, residue "-" and `between`, the residues either side.
+    rows: dict[str, dict[str, Any]]
+    window: dict[str, Any]
+    # None when the input was already aligned; MAFFT's version and options
+    # when this call aligned it.
+    aligned_by: dict[str, Any] | None
     warnings: list[dict[str, Any]]
 
 
@@ -245,11 +276,12 @@ def _annotate(tree, support_by_clade: dict[str, float], tips: set[str]) -> str:
 
 
 def infer_tree(
-    fasta: str,
+    fasta: str | None = None,
     model: str = "GTR+G",
     replicates: int = DEFAULT_REPLICATES,
     seed: int = 1,
     sequence_type: str = "dna",
+    fasta_path: str | None = None,
 ) -> TreeResult:
     """Build a maximum-likelihood tree and measure how well the data support it.
 
@@ -273,8 +305,9 @@ def infer_tree(
             protein alignment also needs a protein model — "LG+G" or "WAG",
             not the nucleotide default — so run select_substitution_model with
             the same sequence_type first.
+        fasta_path: Path of a FASTA file to read instead of `fasta`.
     """
-    seqs = _load(fasta, sequence_type)
+    seqs = _load(text_or_path(fasta, fasta_path, "fasta", "fasta_path"), sequence_type)
     # Every argument check runs BEFORE the maximum-likelihood search. The
     # bootstrap used to be the first thing to look at `replicates` and `seed`,
     # so a bad value was refused only after the most expensive single step had
@@ -317,11 +350,13 @@ def infer_tree(
 
 
 def select_substitution_model(
-    fasta: str,
+    fasta: str | None = None,
     criterion: str = "AIC",
     seed: int = 1,
     top_n: int = 5,
     sequence_type: str = "dna",
+    fasta_path: str | None = None,
+    models: list[str] | None = None,
 ) -> ModelResult:
     """Compare substitution models and report how much the winner won by.
 
@@ -336,25 +371,51 @@ def select_substitution_model(
         top_n: How many ranked models to return.
         sequence_type: "dna" (default) or "protein". Ranks within that molecule
             type's model set — nucleotide and protein models are not comparable.
+        fasta_path: Path of a FASTA file to read instead of `fasta`.
+        models: Rank only these models (IQ-TREE names, e.g. ["JC", "K2P",
+            "F81+F", "HKY+F"]), all returned. Bare "F81"/"HKY" have equal base
+            frequencies in IQ-TREE; JC69, K80 and HKY85 are accepted.
     """
-    seqs = _load(fasta, sequence_type)
+    seqs = _load(text_or_path(fasta, fasta_path, "fasta", "fasta_path"), sequence_type)
     engine.validate_seed(seed)
     if criterion not in CRITERIA:
         raise ValueError(f"criterion must be one of {CRITERIA}, got {criterion!r}")
     stats = summarise(seqs, sequence_type)
     selection = select_model(
-        seqs, criterion=criterion, seed=seed, top_n=top_n, moltype=sequence_type
+        seqs,
+        criterion=criterion,
+        seed=seed,
+        top_n=top_n,
+        moltype=sequence_type,
+        models=models,
     )
+    extra = selection.pop("model_warnings", [])
     return ModelResult(
         **selection,  # type: ignore[typeddict-item]
         alignment=stats.__dict__,
         warnings=diagnostics.collect(
             stats=stats, selection=selection, pinned=engine.threads_pinned()
-        ),
+        )
+        + extra,
     )
 
 
-def compare_trees(newick_a: str, newick_b: str) -> CompareResult:
+def _two_trees(text: str) -> tuple[str, str]:
+    """The two Newick trees in a `trees_path` file, A then B."""
+    trees = [t.strip() + ";" for t in text.split(";") if t.strip()]
+    if len(trees) != 2:
+        raise ValueError(
+            f"trees_path must hold exactly two Newick trees (each ending in ';'), "
+            f"tree A then tree B; found {len(trees)}."
+        )
+    return trees[0], trees[1]
+
+
+def compare_trees(
+    newick_a: str | None = None,
+    newick_b: str | None = None,
+    trees_path: str | None = None,
+) -> CompareResult:
     """Robinson-Foulds distance between two trees, and which clades differ.
 
     Compares SPLITS, not strings: the same topology has many valid Newick
@@ -363,7 +424,17 @@ def compare_trees(newick_a: str, newick_b: str) -> CompareResult:
     Args:
         newick_a: First tree in Newick format.
         newick_b: Second tree in Newick format.
+        trees_path: Instead of the two strings, the path of a file holding
+            exactly two Newick trees, A then B.
     """
+    if trees_path is not None:
+        if newick_a is not None or newick_b is not None:
+            raise ValueError("Give newick_a and newick_b, or trees_path, not both.")
+        newick_a, newick_b = _two_trees(
+            text_or_path(None, trees_path, "", "trees_path")
+        )
+    if newick_a is None or newick_b is None:
+        raise ValueError("Give both newick_a and newick_b, or trees_path.")
     tree_a = parse_newick(newick_a, "newick_a")
     tree_b = parse_newick(newick_b, "newick_b")
     tips_a, tips_b = set(tree_a.get_tip_names()), set(tree_b.get_tip_names())
@@ -464,7 +535,11 @@ def simulate_alignment(
     )
 
 
-def align_sequences(fasta: str, sequence_type: str = "dna") -> AlignResult:
+def align_sequences(
+    fasta: str | None = None,
+    sequence_type: str = "dna",
+    fasta_path: str | None = None,
+) -> AlignResult:
     """Align unaligned sequences with MAFFT, ready for `infer_tree`.
 
     The returned `fasta` has every row the same length and can be passed to
@@ -477,12 +552,13 @@ def align_sequences(fasta: str, sequence_type: str = "dna") -> AlignResult:
             refused: input that is already aligned does not need this tool.
         sequence_type: "dna" (default) or "protein". Declared, never sniffed,
             and passed to MAFFT explicitly so it does not guess either.
+        fasta_path: Path of a FASTA file to read instead of `fasta`.
     """
     if sequence_type not in MOLTYPES:
         raise AlignmentError(
             f"Unknown sequence_type {sequence_type!r}. Valid: {list(MOLTYPES)}."
         )
-    seqs = parse_fasta(fasta)
+    seqs = parse_fasta(text_or_path(fasta, fasta_path, "fasta", "fasta_path"))
     aligned = msa.align(seqs, sequence_type)
     stats = summarise(aligned, sequence_type)
     warnings = diagnostics.collect(stats=stats, pinned=engine.threads_pinned())
@@ -522,6 +598,69 @@ def align_sequences(fasta: str, sequence_type: str = "dna") -> AlignResult:
         ready_for_infer_tree=ready,
         warnings=warnings,
     )
+
+
+def map_positions(
+    aligned: bool,
+    sequence: str | None = None,
+    position: int | None = None,
+    column: int | None = None,
+    fasta: str | None = None,
+    fasta_path: str | None = None,
+    sequence_type: str = "dna",
+) -> PositionsResult:
+    """Map a residue to its alignment column, and the column to every sequence.
+
+    Answers "which residue of B is in the same column as residue N of A" without
+    counting by hand. Positions count residues from 1, gaps not counted; columns
+    count from 1. At a gap, a row's position is null and `between` gives the
+    residues either side.
+
+    Args:
+        aligned: true if the input is an alignment; false if unaligned, and it
+            is aligned with MAFFT first, as `align_sequences` would.
+        sequence: The sequence whose residue `position` is meant.
+        position: A residue position in `sequence`. Give this or `column`.
+        column: An alignment column. Give this or `position`.
+        fasta: The sequences in FASTA.
+        fasta_path: Path of a FASTA file to read instead of `fasta`.
+        sequence_type: "dna" (default) or "protein".
+    """
+    if sequence_type not in MOLTYPES:
+        raise AlignmentError(
+            f"Unknown sequence_type {sequence_type!r}. Valid: {list(MOLTYPES)}."
+        )
+    seqs = parse_fasta(text_or_path(fasta, fasta_path, "fasta", "fasta_path"))
+    warnings: list[dict[str, Any]] = []
+    aligned_by = None
+    if aligned:
+        bad = aln_mod.unrecognised_characters(
+            {c for s in seqs.values() for c in s} - {positions.GAP, "?", "."},
+            sequence_type,
+        )
+        if bad:
+            raise AlignmentError(
+                f"Unrecognised characters for {sequence_type}: {sorted(bad)[:8]}."
+            )
+    else:
+        seqs = msa.align(seqs, sequence_type)
+        aligned_by = {
+            "name": "MAFFT",
+            "version": msa.mafft_version(),
+            "options": msa.mafft_args(sequence_type),
+        }
+        warnings.append(
+            {
+                "code": "column_is_an_inference",
+                "message": (
+                    "The column comes from this MAFFT alignment. Another aligner or "
+                    "settings can place a residue elsewhere, most often inside "
+                    "gappy stretches: check `window` before relying on it."
+                ),
+            }
+        )
+    out = positions.map_column(seqs, sequence, position, column)
+    return PositionsResult(**out, aligned_by=aligned_by, warnings=warnings)  # type: ignore[typeddict-item]
 
 
 def capabilities(include_models: bool = False) -> CapabilitiesResult:
@@ -568,6 +707,10 @@ def capabilities(include_models: bool = False) -> CapabilitiesResult:
     return out
 
 
+# One tool call at a time per process; see the module docstring.
+_ENGINE_LOCK = threading.Lock()
+
+
 def _surfaces_refusals(fn):
     """Re-raise an anticipated refusal as ToolError so its text reaches the model.
 
@@ -596,7 +739,8 @@ def _surfaces_refusals(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
-            return fn(*args, **kwargs)
+            with _ENGINE_LOCK:
+                return fn(*args, **kwargs)
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
 
@@ -644,6 +788,11 @@ def build_server() -> MCPServer:
         annotations=_READ_ONLY,
         structured_output=True,
     )(_surfaces_refusals(align_sequences))
+    mcp.tool(
+        title="Map a residue to its alignment column and across sequences",
+        annotations=_READ_ONLY,
+        structured_output=True,
+    )(_surfaces_refusals(map_positions))
     mcp.tool(
         title="Engine capabilities and limits",
         annotations=_READ_ONLY,

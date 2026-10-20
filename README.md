@@ -33,8 +33,9 @@ _lowest-supported_ one in the tree.
 
 ## Does it help?
 
-Not in our benchmark: with this server Claude was no more accurate than with a
-Python shell, and it was slower and cost more.
+Not yet. In our benchmark Claude was no more accurate with this server than
+with a Python shell, and the server cost more. Taking files by path closed most
+of the cost gap, but not all of it.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/musharna/phylokit-mcp/main/benchmarks/agent_qa/agent_qa.png" alt="Bar chart of 114 answers per setup (38 questions, 3 runs each). Claude alone: 114 declined. Read only: 76 right, 24 wrong, 12 declined, 2 invalid. Python, MAFFT and web: 113 right, 1 invalid. phylokit-mcp: 110 right, 4 wrong." width="780">
@@ -45,7 +46,11 @@ chart does, the server got 110 of 114 right and a Python shell with piqtree and
 MAFFT got 113; counting questions, 36 of 38 were right in every run against 37
 (sign test p = 1). Per question the server took 6.0 times as long (95% CI 4.4
 to 8.3) and cost 14.4 times as much (9.9 to 20.2), each a geometric mean of
-per-question ratios.
+per-question ratios. Most of that cost was the model pasting the data file
+into tool calls. In a pre-registered re-run of an unreleased commit that takes
+file paths (2026-10-18), the server cost 1.26 times as much (1.04 to 1.55) and
+got 36 of 38 questions right in every run against Python's 35: a tie, not a
+win.
 
 The benchmark does not score support values; method, controls and other
 limitations are in [benchmarks/agent_qa](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md).
@@ -73,7 +78,12 @@ limitations are in [benchmarks/agent_qa](https://github.com/musharna/phylokit-mc
 | `compare_trees`             | Robinson–Foulds distance and the clades that differ. Compares splits, not strings. |
 | `simulate_alignment`        | Generates sequences along a tree you specify: the positive control.                |
 | `align_sequences`           | Aligns unaligned FASTA with MAFFT; the output goes straight into `infer_tree`.     |
+| `map_positions`             | Maps a residue to its alignment column, and that column to every other sequence.   |
 | `capabilities`              | piqtree and IQ-TREE versions, 215 substitution models, MAFFT version, limits.      |
+
+Tools that take FASTA or Newick also take a file path (`fasta_path`, or
+`trees_path` for two trees), read by the server; a relative path resolves
+against the server's working directory.
 
 The tests run real IQ-TREE and real MAFFT (no mocked engine), with 23 mutation
 checks and a real-process JSON-RPC handshake test.
@@ -87,8 +97,8 @@ pip install phylokit-mcp
 Requires **Python 3.12+**. IQ-TREE 3 comes through
 [piqtree](https://github.com/cogent3/piqtree) 0.8, which builds it into its
 wheel. `align_sequences` also needs the
-[MAFFT](https://mafft.cbrc.jp/alignment/software/) binary on `PATH`; the other
-five tools work without it. Details: [docs/INSTALL.md](https://github.com/musharna/phylokit-mcp/blob/main/docs/INSTALL.md).
+[MAFFT](https://mafft.cbrc.jp/alignment/software/) binary on `PATH`, as does
+`map_positions` on unaligned input; the other tools work without it. Details: [docs/INSTALL.md](https://github.com/musharna/phylokit-mcp/blob/main/docs/INSTALL.md).
 
 ## Configure your MCP client
 

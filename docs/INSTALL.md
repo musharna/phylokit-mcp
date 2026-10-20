@@ -12,7 +12,8 @@ so there is no compiler, R or conda step.
 
 `align_sequences` needs the [MAFFT](https://mafft.cbrc.jp/alignment/software/)
 binary on `PATH` (`apt install mafft`, `brew install mafft` or
-`conda install -c bioconda mafft`). Without it the other five tools work,
+`conda install -c bioconda mafft`), as does `map_positions` on unaligned
+input. Without it the other tools work,
 `capabilities` reports `aligner_version: null`, and `align_sequences` returns a
 refusal naming the install rather than crashing. If MAFFT is installed but does
 not answer `--version`, `aligner_error` says what happened.
