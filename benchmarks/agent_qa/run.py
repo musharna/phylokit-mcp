@@ -43,10 +43,23 @@ mark every run invalid.
     uv run python benchmarks/agent_qa/run.py --reps 3 --workers 2
 
 ``--server-spec git+https://github.com/musharna/phylokit-mcp@<40-hex sha>``
-runs the mcp arm on an unreleased commit instead of the PyPI pin. The spec is
+runs the mcp arm on an unreleased commit instead of the PyPI pin, and
+``--server-spec phylokit-mcp==<x.y.z>`` on another release. The spec is
 written into every result row and into ``--versions`` (a JSON file of what each
 arm ran on), and ``check_mcp`` confirms the installed package came from that
-commit before any run is spent.
+commit, or is that release, before any run is spent.
+
+``--model`` runs every arm on another Claude model (default ``MODEL``); its
+transcripts go to ``<artifacts>/runs-<model>/``, so the default model's are
+never overwritten. ``versions.json`` records the model asked for and the
+models the runs' init events say served them (``model_served``); a run served
+by another model stops the sweep.
+
+Usage gate (``usage_gate``): after each run, the transcript's last
+``rate_limit_event`` is read. A rejected request, or a five-hour window at or
+above ``PAUSE_FIVE_HOUR``, holds every later run until the window resets; a
+seven-day window at or above ``STOP_SEVEN_DAY`` stops the sweep (no later run
+starts). Each pause and stop is written to ``versions.json``.
 """
 
 from __future__ import annotations
@@ -71,11 +84,18 @@ from score import score
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 MODEL = "claude-opus-5-5"
+DEFAULT_MODEL = MODEL
 SERVER = "phylokit-mcp==0.6.0"
 # A git spec must name a full commit: a branch or tag can move under a sweep.
 GIT_SPEC = re.compile(
     r"^git\+https://github\.com/musharna/phylokit-mcp@([0-9a-f]{40})$"
 )
+# A PyPI spec must name one release exactly: a range can move under a sweep.
+PYPI_SPEC = re.compile(r"^phylokit-mcp==(\d+\.\d+\.\d+)$")
+# The usage gate: hold later runs at this five-hour use, stop at this seven-day use
+# (0.90 from the tiers brief's amendment of 2026-10-20, 18:50 EDT).
+PAUSE_FIVE_HOUR = 0.85
+STOP_SEVEN_DAY = 0.90
 RUN_TIMEOUT_S = 1800
 ARTIFACTS = Path(
     os.environ.get(
@@ -83,6 +103,15 @@ ARTIFACTS = Path(
     )
 )
 RUNS = ARTIFACTS / "runs"
+
+
+def set_model(model: str) -> None:
+    """Run on ``model``; a non-default model's transcripts get their own dir."""
+    global MODEL, RUNS
+    MODEL = model
+    RUNS = ARTIFACTS / ("runs" if model == DEFAULT_MODEL else f"runs-{model}")
+
+
 # The alt arm's Python: the repo's locked piqtree/cogent3/numpy, without the
 # server. The worktree's own .venv has phylokit_mcp installed (editable), and a
 # run that imported it would be the mcp arm by another route. It lives with
@@ -220,13 +249,14 @@ def check_alt(checked: dict[str, str]) -> dict[str, str]:
 
 
 def check_server_spec(spec: str) -> str | None:
-    """The PyPI pin, or a git spec naming a full commit; returns the commit."""
-    if spec == SERVER:
+    """One PyPI release pinned exactly, or a git spec naming a full commit;
+    returns the commit (None for a release)."""
+    if PYPI_SPEC.match(spec):
         return None
     m = GIT_SPEC.match(spec)
     if not m:
         raise SystemExit(
-            f"--server-spec must be {SERVER!r} or "
+            f"--server-spec must be phylokit-mcp==<x.y.z> (e.g. {SERVER!r}) or "
             f"git+https://github.com/musharna/phylokit-mcp@<40-hex sha>; got {spec!r}"
         )
     return m.group(1)
@@ -269,6 +299,9 @@ def check_mcp(checked: dict[str, str], spec: str = SERVER) -> dict[str, str]:
     commit = check_server_spec(spec)
     if commit is not None and out.get("commit") != commit:
         raise SystemExit(f"{spec} installed commit {out.get('commit')!r}, not {commit}")
+    pin = PYPI_SPEC.match(spec)
+    if pin and out.get("phylokit-mcp") != pin.group(1):
+        raise SystemExit(f"{spec} installed {out.get('phylokit-mcp')!r}")
     return out
 
 
@@ -520,6 +553,91 @@ def run_one(
     }
 
 
+def usage_gate(events: list[dict[str, Any]]) -> tuple[str | None, dict[str, Any]]:
+    """What the run's last ``rate_limit_event`` asks of the sweep: ``"stop"``
+    (seven-day use >= STOP_SEVEN_DAY), ``"pause"`` (a rejected request, or
+    five-hour use >= PAUSE_FIVE_HOUR; ``until`` is when that window resets), or
+    None; and the reading. A pause with no reset time to wait for is a stop."""
+    info = next(
+        (
+            e.get("rate_limit_info") or {}
+            for e in reversed(events)
+            if e.get("type") == "rate_limit_event"
+        ),
+        None,
+    )
+    if info is None:
+        return None, {}
+    win = info.get("unifiedWindows") or {}
+    five, seven = win.get("five_hour") or {}, win.get("seven_day") or {}
+    rec = {
+        "status": info.get("status"),
+        "five_hour": five.get("utilization"),
+        "seven_day": seven.get("utilization"),
+    }
+    if (seven.get("utilization") or 0) >= STOP_SEVEN_DAY:
+        return "stop", rec
+    rejected = info.get("status") == "rejected"
+    if rejected or (five.get("utilization") or 0) >= PAUSE_FIVE_HOUR:
+        until = info.get("resetsAt") if rejected else five.get("resetsAt")
+        if not isinstance(until, (int, float)):
+            return "stop", rec | {"why": "pause with no resetsAt"}
+        return "pause", rec | {"until": until}
+    return None, rec
+
+
+class Gate:
+    """Holds or stops the runs not yet started, from each finished run's
+    transcript (``usage_gate``) and the model that served it."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.until = 0.0
+        self.stopped: dict[str, Any] | None = None
+        self.log: list[dict[str, Any]] = []
+
+    def wait(self) -> bool:
+        """Block while paused; False once stopped."""
+        while True:
+            with self.lock:
+                if self.stopped is not None:
+                    return False
+                left = self.until - time.time()
+            if left <= 0:
+                return True
+            time.sleep(min(left, 60))
+
+    def update(self, events: list[dict[str, Any]], served: str | None) -> None:
+        now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        action, rec = usage_gate(events)
+        if served is not None and served != MODEL:
+            action, rec = "stop", rec | {"why": f"served by {served}, not {MODEL}"}
+        with self.lock:
+            if action == "stop" and self.stopped is None:
+                self.stopped = {"action": "stop", "at": now, **rec}
+                self.log.append(self.stopped)
+                print(f"USAGE GATE: stop {rec}", flush=True)
+            elif action == "pause" and rec["until"] + 60 > self.until:
+                self.until = rec["until"] + 60
+                self.log.append({"action": "pause", "at": now, **rec})
+                print(f"USAGE GATE: pause until {rec['until']} {rec}", flush=True)
+
+
+def gated_run(
+    gate: Gate, arm: str, q: dict[str, Any], rep: int, spec: str
+) -> dict[str, Any] | None:
+    """``run_one`` once the gate allows it; None (not run) once it has stopped."""
+    if not gate.wait():
+        return None
+    r = run_one(arm, q, rep, spec)
+    path = transcript(arm, q["id"], rep)
+    events = [
+        json.loads(ln) for ln in path.read_text().splitlines() if ln.startswith("{")
+    ]
+    gate.update(events, r["model"])
+    return r
+
+
 def api_failure(events: list[dict[str, Any]], rc: object) -> str | None:
     """Why the API, not the model, ended this run, or None.
 
@@ -617,9 +735,10 @@ def main() -> None:
     ap.add_argument(
         "--server-spec",
         default=SERVER,
-        help=f"the mcp arm's server: {SERVER} or git+https://github.com/musharna/"
-        "phylokit-mcp@<full sha> (an unreleased commit)",
+        help=f"the mcp arm's server: phylokit-mcp==<x.y.z> (default {SERVER}) or "
+        "git+https://github.com/musharna/phylokit-mcp@<full sha> (an unreleased commit)",
     )
+    ap.add_argument("--model", default=MODEL, help=f"claude --model (default {MODEL})")
     ap.add_argument(
         "--versions",
         default="",
@@ -641,6 +760,7 @@ def main() -> None:
         help="re-score every stored reply against the current questions.json, run nothing",
     )
     a = ap.parse_args()
+    set_model(a.model)
     if a.setup_alt:
         setup_alt()
         return
@@ -683,13 +803,14 @@ def main() -> None:
     vpath = Path(a.versions or Path(a.results).with_name("versions.json"))
     if vpath.exists():
         old = json.loads(vpath.read_text())
-        same = {k: old.get(k) for k in ("server_spec", "mcp", "alt", "mafft")}
+        same = {k: old.get(k) for k in ("model", "server_spec", "mcp", "alt", "mafft")}
         if same != {k: versions.get(k) for k in same}:
             raise SystemExit(
                 f"{vpath} records another setup ({same}); a resumed sweep must run on "
                 "the same one"
             )
         versions["started"] = old.get("started", versions["started"])
+        versions["usage_gate"] = old.get("usage_gate", [])
         versions["resumed"] = old.get("resumed", []) + [
             time.strftime("%Y-%m-%dT%H:%M:%S%z")
         ]
@@ -712,10 +833,13 @@ def main() -> None:
     ]
     print(f"{len(todo)} runs to do ({len(done)} already in {results.name})", flush=True)
     lock = threading.Lock()
+    gate = Gate()
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
-        futures = [pool.submit(run_one, *t, a.server_spec) for t in todo]
+        futures = [pool.submit(gated_run, gate, *t, a.server_spec) for t in todo]
         for n, f in enumerate(as_completed(futures), 1):
             r = f.result()
+            if r is None:
+                continue
             with lock, results.open("a") as fh:
                 fh.write(json.dumps(r) + "\n")
             print(
@@ -724,6 +848,12 @@ def main() -> None:
                 f" ${r['cost_usd']}",
                 flush=True,
             )
+    rows = [json.loads(ln) for ln in results.read_text().splitlines()]
+    versions["model_served"] = sorted({str(r.get("model")) for r in rows})
+    versions["usage_gate"] = versions.get("usage_gate", []) + gate.log
+    vpath.write_text(json.dumps(versions, indent=2) + "\n")
+    if gate.stopped is not None:
+        raise SystemExit(f"stopped by the usage gate: {gate.stopped}")
     sys.exit(0)
 
 

@@ -335,9 +335,10 @@ def test_the_needs_compute_subset_keeps_only_its_kinds_and_pairs_on_them() -> No
 # --- server spec ---------------------------------------------------------------
 
 
-def test_server_spec_takes_the_pin_or_a_full_commit_and_nothing_else() -> None:
+def test_server_spec_takes_an_exact_release_or_a_full_commit_and_nothing_else() -> None:
     sha = "0123456789abcdef0123456789abcdef01234567"
     assert run.check_server_spec(run.SERVER) is None
+    assert run.check_server_spec("phylokit-mcp==0.7.0") is None
     assert (
         run.check_server_spec(f"git+https://github.com/musharna/phylokit-mcp@{sha}")
         == sha
@@ -346,7 +347,10 @@ def test_server_spec_takes_the_pin_or_a_full_commit_and_nothing_else() -> None:
         "git+https://github.com/musharna/phylokit-mcp@main",  # a branch moves
         f"git+https://github.com/musharna/phylokit-mcp@{sha[:12]}",  # short sha
         f"git+https://github.com/someone/phylokit-mcp@{sha}",  # another repo
-        "phylokit-mcp==0.5.1",
+        "phylokit-mcp>=0.7.0",  # a range moves
+        "phylokit-mcp==0.7",  # not one exact release
+        "phylokit-mcp",
+        "other-mcp==0.7.0",
     ):
         try:
             run.check_server_spec(bad)
@@ -388,3 +392,179 @@ def test_api_failures_are_told_apart_from_model_failures() -> None:
     assert run.api_failure([init, rejected, errored], 1) == "rate_limited"
     assert run.api_failure([init, errored], 1) == "api_error"
     assert run.api_failure([init], "timeout") == "timeout"
+
+
+# --- model tiers (PREREG_2026-10-20_model-tiers) ---------------------------------
+
+
+def test_a_non_default_model_writes_its_transcripts_to_its_own_dir() -> None:
+    try:
+        run.set_model("claude-haiku-5-5")
+        assert run.MODEL == "claude-haiku-5-5"
+        haiku = run.transcript("mcp", "q01", 1)
+        assert haiku == run.ARTIFACTS / "runs-claude-haiku-5-5" / "mcp" / "q01-1.jsonl"
+        run.set_model(run.DEFAULT_MODEL)
+        # The default model's transcripts stay where the 10-16/10-18 ones are.
+        assert run.transcript("mcp", "q01", 1) == run.ARTIFACTS / "runs/mcp/q01-1.jsonl"
+    finally:
+        run.set_model(run.DEFAULT_MODEL)
+
+
+def _rl(status: str, five: float, seven: float) -> dict:
+    return {
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+            "status": status, "resetsAt": 2000, "rateLimitType": "five_hour",
+            "unifiedWindows": {
+                "five_hour": {"utilization": five, "resetsAt": 1000},
+                "seven_day": {"utilization": seven, "resetsAt": 9000},
+            },
+        },
+    }  # fmt: skip
+
+
+def test_the_usage_gate_pauses_at_the_five_hour_limit_and_stops_at_the_seven_day() -> (
+    None
+):
+    # Below both limits, or no reading at all: carry on.
+    assert run.usage_gate([_rl("allowed", 0.84, 0.89)])[0] is None
+    assert run.usage_gate([{"type": "result"}]) == (None, {})
+    # Five-hour at the limit: hold until that window resets.
+    act, rec = run.usage_gate([_rl("allowed", 0.85, 0.5)])
+    assert (act, rec["until"]) == ("pause", 1000)
+    # A rejected request: hold until the reset the rejection names.
+    act, rec = run.usage_gate([_rl("rejected", 0.5, 0.5)])
+    assert (act, rec["until"]) == ("pause", 2000)
+    # Seven-day at the limit stops, whatever the five-hour says.
+    assert run.usage_gate([_rl("allowed", 0.9, 0.90)])[0] == "stop"
+    # The last reading counts, not the first.
+    assert (
+        run.usage_gate([_rl("allowed", 0.9, 0.5), _rl("allowed", 0.1, 0.5)])[0] is None
+    )
+    # A pause with nothing to wait for is a stop, not a guess.
+    bad = _rl("allowed", 0.9, 0.5)
+    del bad["rate_limit_info"]["unifiedWindows"]["five_hour"]["resetsAt"]
+    assert run.usage_gate([bad])[0] == "stop"
+
+
+def test_the_gate_holds_later_runs_and_stops_on_another_model(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    calls: list[str] = []
+
+    def fake_run_one(arm: str, q: dict, rep: int, spec: str) -> dict:
+        calls.append(q["id"])
+        path = run.transcript(arm, q["id"], rep)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(_rl("allowed", 0.1, 0.1)) + "\n")
+        return {"model": served}
+
+    monkeypatch.setattr(run, "RUNS", tmp_path)
+    monkeypatch.setattr(run, "MODEL", "claude-haiku-5-5")
+    monkeypatch.setattr(run, "run_one", fake_run_one)
+    gate = run.Gate()
+    served = "claude-haiku-5-5"
+    # Served by the model asked for, under the limits: it runs, the gate stays open.
+    assert run.gated_run(gate, "mcp", {"id": "q01"}, 1, run.SERVER) == {"model": served}
+    assert gate.stopped is None and gate.wait() is True and gate.until == 0.0
+    # A pause reading moves the hold to the reset time (+60 s), and is logged.
+    gate.update([_rl("allowed", 0.9, 0.1)], served)
+    assert gate.until == 1060 and gate.log[-1]["action"] == "pause"
+    gate.until = 0.0
+    # Served by another model: the gate stops, and no later run starts.
+    served = "claude-opus-5-5"
+    run.gated_run(gate, "mcp", {"id": "q02"}, 1, run.SERVER)
+    assert (
+        gate.stopped is not None and "served by claude-opus-5-5" in gate.stopped["why"]
+    )
+    assert run.gated_run(gate, "mcp", {"id": "q03"}, 1, run.SERVER) is None
+    assert calls == ["q01", "q02"]
+
+
+def test_holm_matches_hand_values() -> None:
+    assert analyze.holm({"a": 0.01, "b": 0.04}) == {"a": 0.02, "b": 0.04}
+    # Step-down is monotone: the larger p never drops below the smaller's adjustment.
+    assert analyze.holm({"a": 0.03, "b": 0.02}) == {"b": 0.04, "a": 0.04}
+    assert analyze.holm({"a": 0.7, "b": 0.6}) == {"b": 1.0, "a": 1.0}
+
+
+def _tier(a_only: int, b_only: int, p: float, ci: tuple[float, float]) -> dict:
+    return {
+        "a_only": a_only, "b_only": b_only, "sign_test_p": p,
+        "right_every_run_diff_ci": ci,
+    }  # fmt: skip
+
+
+def test_the_tier_rule_needs_a_holm_significant_lift_and_no_drop() -> None:
+    lift = _tier(0, 9, 0.004, (4.0, 13.0))
+    drop = _tier(9, 0, 0.004, (-13.0, -4.0))
+    flat = _tier(2, 3, 1.0, (-3.0, 4.0))
+    assert analyze.tier_rule({"haiku": lift, "sonnet": flat}) == (
+        "WIN", {"haiku": "LIFT", "sonnet": "NONE"},
+    )  # fmt: skip
+    assert analyze.tier_rule({"haiku": drop, "sonnet": flat})[0] == "LOSS"
+    assert analyze.tier_rule({"haiku": lift, "sonnet": drop})[0] == "MIXED"
+    assert analyze.tier_rule({"haiku": flat, "sonnet": flat})[0] == "TIE"
+    # p = 0.03 is significant raw but not after Holm over two tiers.
+    near = _tier(0, 6, 0.03, (2.0, 9.0))
+    assert analyze.tier_rule({"haiku": near, "sonnet": flat})[1]["haiku"] == "NONE"
+    # Significant, but a CI that reaches 0 is not a lift.
+    assert analyze.tier_rule({"haiku": lift | {"right_every_run_diff_ci": (0.0, 9.0)},
+                              "sonnet": flat})[1]["haiku"] == "NONE"  # fmt: skip
+    # One tier in: pending, and judged with the full family's Holm factor.
+    assert analyze.tier_rule({"haiku": lift}) == ("PENDING", {"haiku": "LIFT"})
+    assert analyze.tier_rule({"haiku": near})[1]["haiku"] == "NONE"
+
+
+def test_paired_rows_report_the_accuracy_difference_and_the_server_call_count() -> None:
+    rows = []
+    for i in range(10):
+        for rep in (1, 2, 3):
+            rows.append(_row("alt", f"q{i}", rep, "right" if i < 4 else "wrong"))
+            m = _row("mcp", f"q{i}", rep, "right")
+            m["tool_calls"] = (
+                ["Read"] if i == 0 else ["Read", "mcp__phylokit__infer_tree"]
+            )
+            rows.append(m)
+    (p,) = analyze.paired_rows(rows, np.random.default_rng(3))
+    assert p["right_every_run_diff_b_minus_a"] == 6
+    lo, hi = p["right_every_run_diff_ci"]
+    assert 0 < lo <= 6 <= hi <= 10
+    arms = {
+        r["arm"]: r
+        for r in analyze.arm_rows(rows, np.random.default_rng(3))
+        if r["level"] == "arm"
+    }
+    assert arms["mcp"]["runs_without_server_call"] == 3
+    assert abs(arms["mcp"]["server_calls_mean"] - 0.9) < 1e-9
+    assert "runs_without_server_call" not in arms["alt"]
+
+
+def test_a_release_pin_must_install_that_release(monkeypatch: Any) -> None:
+    """check_mcp reads the installed version back; a resolver that hands over
+    another release (here 0.6.0 for ==0.7.0) is refused before any run."""
+    checked = {"piqtree": "0.8.3"}
+
+    def fake(installed: str) -> Any:
+        def sub(cmd: list[str], **kw: Any) -> Any:
+            code = cmd[-1]
+            out = (
+                {"piqtree": "0.8.3", "cogent3": "x", "numpy": "y"}
+                if "piqtree" in code
+                else {"phylokit-mcp": installed, "commit": None}
+            )
+            return type("P", (), {"returncode": 0, "stdout": json.dumps(out)})()
+
+        return sub
+
+    monkeypatch.setattr(run, "_uvx_server_args", lambda spec: ["--from", spec, "x"])
+    monkeypatch.setattr(run.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(run.subprocess, "run", fake("0.7.0"))
+    assert run.check_mcp(checked, "phylokit-mcp==0.7.0")["phylokit-mcp"] == "0.7.0"
+    monkeypatch.setattr(run.subprocess, "run", fake("0.6.0"))
+    try:
+        run.check_mcp(checked, "phylokit-mcp==0.7.0")
+    except SystemExit as exc:
+        assert "installed '0.6.0'" in str(exc)
+    else:
+        raise AssertionError("0.6.0 was accepted for ==0.7.0")
