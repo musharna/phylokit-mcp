@@ -169,7 +169,7 @@ input, no other run's directory, no "named phylokit":
 | Row | Hits | What printed the path |
 |---|---|---|
 | alt q16 | 1 | `which mafft`: `.../bin/mafft` |
-| alt q03, q06, q21, q24, q27 | 1 each (q27: 2) | the alt env's `site-packages` path (a `print` of a module's location, or `sys.path`) |
+| alt q03, q06, q21, q24, q27 | 1 each | the alt env's `site-packages` path (a `print` of a module's location, or `sys.path`) |
 | alt q05, q20, q23, q25, q26, q27 | 2-6 each | Python tracebacks and `<module 'piqtree.iqtree' from '.../alt-env/lib/python3.14/site-packages/...'>` |
 
 All 21 are paths inside the harness's own tool installs (`alt-env/`, `bin/`).
