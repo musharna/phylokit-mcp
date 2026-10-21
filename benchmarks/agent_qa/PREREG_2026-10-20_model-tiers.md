@@ -138,3 +138,30 @@ running, the oracle (38/38 right, 38/38 wrong), the alt env, MAFFT v7.526 and
 
 The usage reading before this file: seven_day 0.69, five_hour 0.13 (18:35
 EDT, newest transcript on the account).
+
+## Deviations, recorded during the sweep (2026-10-21, 00:30 EDT, before any analysis)
+
+- **Usage stop.** The Haiku sweep started at 23:03 EDT and the usage gate
+  stopped it at 00:17 EDT, when a transcript read seven-day use 0.90 (five-hour
+  0.73). 87 of 342 runs are in `tiers_2026-10-20/haiku/results.jsonl`: rep 1,
+  q01 to q29, all three arms. They are kept. Nothing after the stop has run;
+  Sonnet has not started. The account's seven-day window resets Sun 10-25,
+  12:00 EDT. The sweep is to be resumed, not restarted.
+- **Claude Code** auto-updated to 2.1.306 before the sweep (this file says
+  2.1.305); `versions.json` records 2.1.306.
+- **CPU load.** Other work shared the machine (load average about 15 of 22
+  cores; from 23:50 a second benchmark lane). The arms are interleaved, so only
+  seconds per run is affected.
+- **A harness artifact in the validity rule, found in the rows (decision
+  pending, not applied).** 11 of 29 alt rows are invalid, every one a right
+  answer, and every one for the same reason: the leak scan matched `agent_qa`
+  in a tool output, which was the path of the harness's own MAFFT link
+  (`which mafft` printed `.../phylokit-mcp-artifacts/agent_qa/model-tiers-2026-10-20/bin/mafft`).
+  It is not the key or the benchmark's code. The mcp arm has no shell, so it
+  cannot trip this, and an invalid row counts as not right: as written, the
+  rule penalizes alt only. On Opus 10-18 this hit 3 of 114 alt rows; Haiku
+  runs `which` much more often. No rule change is made here; the choice (keep
+  the rule as written, or move the artifacts to a path that names nothing the
+  scan looks for before resuming and re-judge every row by one rule) is left
+  to the coordinator, and whichever is chosen will be reported with the
+  result as-written beside it.
