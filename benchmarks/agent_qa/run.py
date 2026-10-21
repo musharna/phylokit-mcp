@@ -394,12 +394,38 @@ def _tool_outputs(events: list[dict[str, Any]]) -> list[str]:
     ]
 
 
-def leak_hits(events: list[dict[str, Any]], own_cwd: str | None) -> list[str]:
+def mask_tool_paths(text: str) -> str:
+    """``text`` with every path inside the harness's own tool installs (the alt
+    env and the MAFFT link dir, absolute or ~-form) replaced by <tool-path>.
+
+    The narrowed leak rule (PREREG_2026-10-20_model-tiers, deviation of
+    2026-10-21): a traceback, a module's ``__file__``, ``which mafft`` or a PATH
+    listing prints these, and they sit under the artifacts dir, so the
+    as-written scan read the harness's install path as a leak (11 of 29 Haiku
+    alt rows; the mcp arm has no shell and cannot print one). A path that
+    climbs out of an install (``/..``) is left in place and still scanned."""
+    for base in (ALT_ENV, BIN):
+        for prefix in {str(base), _home_as_tilde(str(base)) or str(base)}:
+            pat = re.escape(prefix) + r"(?:/[^\s\"'\\:]*)?(?![\w.-])"
+            text = re.sub(
+                pat,
+                lambda m: m.group(0) if "/.." in m.group(0) else "<tool-path>",
+                text,
+            )
+    return text
+
+
+def leak_hits(
+    events: list[dict[str, Any]], own_cwd: str | None, narrow: bool = True
+) -> list[str]:
     """Every forbidden string in any tool input or output (LEAK_PATTERNS, plus
-    any run directory that is not this run's own)."""
+    any run directory that is not this run's own); with ``narrow`` (the primary
+    rule since 2026-10-21), after ``mask_tool_paths``."""
     own = Path(own_cwd).parent.name if own_cwd else None
     hits: list[str] = []
     for text in _tool_inputs(events) + _tool_outputs(events):
+        if narrow:
+            text = mask_tool_paths(text)
         for pat in LEAK_PATTERNS:
             hits += re.findall(pat, text)
         hits += [m for m in RUN_DIR.findall(text) if m != own]
@@ -441,12 +467,23 @@ def validity(arm: str, events: list[dict[str, Any]], rc: object) -> dict[str, An
     ]
     if arm != "bare" and not calls:
         reasons.append("no tool call")
-    if arm != "mcp" and any("phylokit" in s.lower() for s in _tool_inputs(events)):
-        reasons.append("named phylokit")
-    leaks = leak_hits(events, init.get("cwd"))
-    if leaks:
-        reasons.append("leak")
-    return {"valid": not reasons, "invalid_reasons": reasons, "leaks": leaks}
+    out: dict[str, Any] = {}
+    for narrow, sfx in ((False, "_as_written"), (True, "")):
+        why = list(reasons)
+        inputs = _tool_inputs(events)
+        if narrow:
+            inputs = [mask_tool_paths(s) for s in inputs]
+        if arm != "mcp" and any("phylokit" in s.lower() for s in inputs):
+            why.append("named phylokit")
+        leaks = leak_hits(events, init.get("cwd"), narrow)
+        if leaks:
+            why.append("leak")
+        out |= {
+            f"valid{sfx}": not why,
+            f"invalid_reasons{sfx}": why,
+            f"leaks{sfx}": leaks,
+        }
+    return out
 
 
 def _home_as_tilde(path: str | None) -> str | None:

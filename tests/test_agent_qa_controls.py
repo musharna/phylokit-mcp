@@ -590,3 +590,46 @@ def test_tiers_main_prints_the_holm_p_the_verdict_was_made_on(
     analyze.tiers_main(f"haiku={path},sonnet={path}")
     out = capsys.readouterr().out
     assert out.count("Holm p=0.0156") == 2 and "): WIN" in out
+
+
+def test_the_narrowed_leak_rule_ignores_the_harness_tool_paths_and_nothing_else() -> (
+    None
+):
+    """PREREG_2026-10-20 deviation (2026-10-21): every hit in the first 87 Haiku
+    rows was the alt env's or the MAFFT link's own path (a traceback, a
+    module's __file__, ``which mafft``). Those no longer count; the key, the
+    transcripts, another run's dir and a climb out of an install still do,
+    and the as-written judgement is kept beside the primary one."""
+    env, mafft = str(run.ALT_ENV), str(run.BIN / "mafft")
+    v = run.validity
+    tool_paths = [
+        f'  File \\"{env}/lib/python3.14/site-packages/piqtree/iqtree/_tree.py\\", line 3',
+        f"TypeError: <module 'piqtree.iqtree' from '{env}/lib/python3.14/site-packages'",
+        f"10\n{mafft}",
+        f"{env}/bin:{run.BIN}:/usr/local/bin:/usr/bin:/bin",
+        f"ok {env}/lib/python3.14/site-packages",
+    ]
+    for text in tool_paths:
+        r = v("alt", _events(ALT, [("Bash", {"command": "which mafft"})], [text]), 0)
+        assert r["valid"] and r["leaks"] == [], text
+        # As written, the same output is a leak: the secondary result keeps it.
+        assert not r["valid_as_written"] and r["leaks_as_written"] == ["agent_qa"]
+    # A tool input that runs the alt env's python by path is not "named phylokit".
+    by_path = v(
+        "alt", _events(ALT, [("Bash", {"command": f"{env}/bin/python3 x.py"})]), 0
+    )
+    assert (
+        by_path["valid"] and "named phylokit" in by_path["invalid_reasons_as_written"]
+    )
+    # Genuine leaks still count under the narrowed rule.
+    art = str(run.ARTIFACTS)
+    for text, hit in (
+        (f"cat {art}/runs-claude-haiku-5-5/alt/q01-1.jsonl", "agent_qa"),
+        (f"{env}/../runs/alt/q01-1.jsonl", "agent_qa"),
+        ("cat ../../questions.json", "questions.json"),
+        ("phyloqa-mcp-bbbb2222", "phyloqa-mcp-bbbb2222"),
+        (f"{env}X/lib", "agent_qa"),  # a sibling of the install, not inside it
+    ):
+        r = v("alt", _events(ALT, [("Bash", {"command": "ls"})], [text]), 0)
+        assert not r["valid"] and hit in r["leaks"], text
+    assert run.mask_tool_paths(f"x {mafft} y") == "x <tool-path> y"

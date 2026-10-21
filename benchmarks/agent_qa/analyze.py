@@ -452,7 +452,18 @@ def tiers_main(spec: str) -> None:
     print(f"tier rule (PREREG_2026-10-20_model-tiers): {verdict}")
 
 
+def as_written(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows judged by the leak rule as written before 2026-10-21 (the
+    secondary result); a row without that judgement is an error."""
+    missing = [r for r in rows if "valid_as_written" not in r]
+    if missing:
+        raise SystemExit(f"{len(missing)} rows lack valid_as_written: run.py --rescore")
+    return [r | {"valid": r["valid_as_written"]} for r in rows]
+
+
 def main(argv: list[str]) -> None:
+    written = "--as-written" in argv
+    argv = [x for x in argv if x != "--as-written"]
     tiers = [x.split("=", 1)[1] for x in argv if x.startswith("--tiers=")]
     if tiers:
         tiers_main(tiers[0])
@@ -462,6 +473,9 @@ def main(argv: list[str]) -> None:
     paths = [Path(p) for p in argv[0].split(",")] if argv else [HERE / "results.jsonl"]
     outdir = Path(argv[1]) if len(argv) > 1 else paths[0].parent
     rows = [json.loads(ln) for p in paths for ln in p.read_text().splitlines()]
+    if written:
+        rows = as_written(rows)
+        print("validity: the leak rule AS WRITTEN (secondary)")
     keys = [(r["arm"], r["qid"], r["rep"]) for r in rows]
     if len(set(keys)) != len(keys):
         raise SystemExit(f"a run appears twice across {[str(p) for p in paths]}")

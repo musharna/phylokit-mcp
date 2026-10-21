@@ -139,7 +139,7 @@ running, the oracle (38/38 right, 38/38 wrong), the alt env, MAFFT v7.526 and
 The usage reading before this file: seven_day 0.69, five_hour 0.13 (18:35
 EDT, newest transcript on the account).
 
-## Deviations, recorded during the sweep (2026-10-21, 00:30 EDT, before any analysis)
+## Deviations, recorded during the sweep (2026-10-21, 00:18 EDT, before any analysis)
 
 - **Usage stop.** The Haiku sweep started at 23:03 EDT and the usage gate
   stopped it at 00:17 EDT, when a transcript read seven-day use 0.90 (five-hour
@@ -152,16 +152,52 @@ EDT, newest transcript on the account).
 - **CPU load.** Other work shared the machine (load average about 15 of 22
   cores; from 23:50 a second benchmark lane). The arms are interleaved, so only
   seconds per run is affected.
-- **A harness artifact in the validity rule, found in the rows (decision
-  pending, not applied).** 11 of 29 alt rows are invalid, every one a right
-  answer, and every one for the same reason: the leak scan matched `agent_qa`
-  in a tool output, which was the path of the harness's own MAFFT link
-  (`which mafft` printed `.../phylokit-mcp-artifacts/agent_qa/model-tiers-2026-10-20/bin/mafft`).
-  It is not the key or the benchmark's code. The mcp arm has no shell, so it
-  cannot trip this, and an invalid row counts as not right: as written, the
-  rule penalizes alt only. On Opus 10-18 this hit 3 of 114 alt rows; Haiku
-  runs `which` much more often. No rule change is made here; the choice (keep
-  the rule as written, or move the artifacts to a path that names nothing the
-  scan looks for before resuming and re-judge every row by one rule) is left
-  to the coordinator, and whichever is chosen will be reported with the
-  result as-written beside it.
+- **A harness artifact in the validity rule** (as first recorded at 00:18;
+  its description of the cause was wrong in one detail, corrected below).
+  11 of the 29 alt rows were invalid, all of them right answers, and all for
+  one reason: the leak scan matched `agent_qa` in a tool output that printed
+  the harness's own tool install path, which sits under
+  `~/phylokit-mcp-artifacts/agent_qa/model-tiers-2026-10-20/`. The mcp arm has
+  no shell, so it cannot trip this, and an invalid row counts as not right.
+
+### Decision: narrowed leak rule (2026-10-21, 00:22 EDT, coordinator's decision, before any more rows and before any analysis)
+
+Every scan hit in the 87 rows (all arms) was listed and classified by hand.
+There are 21 hits in 11 rows, all alt. None in bare or mcp, none in a tool
+input, no other run's directory, no "named phylokit":
+
+| Row | Hits | What printed the path |
+|---|---|---|
+| alt q16 | 1 | `which mafft`: `.../bin/mafft` |
+| alt q03, q06, q21, q24, q27 | 1 each (q27: 2) | the alt env's `site-packages` path (a `print` of a module's location, or `sys.path`) |
+| alt q05, q20, q23, q25, q26, q27 | 2-6 each | Python tracebacks and `<module 'piqtree.iqtree' from '.../alt-env/lib/python3.14/site-packages/...'>` |
+
+All 21 are paths inside the harness's own tool installs (`alt-env/`, `bin/`).
+None touches the key, the benchmark's code, transcripts, results or another
+run. There is no genuine leak among them.
+
+Rule from here on, for ALL rows of ALL arms, as the PRIMARY result:
+before the leak scan and the "named phylokit" check, any path inside the
+alt env or the MAFFT link directory (absolute or `~/` form) is masked
+(`run.mask_tool_paths`). A path that climbs out of an install (`/..`) is not
+masked, and every other pattern applies unchanged: the key file, the
+benchmark's code, `results.jsonl`, the artifacts and transcripts dirs, the
+repo's worktrees, its GitHub directory and another run's directory still
+invalidate (`tests/test_agent_qa_controls.py::test_the_narrowed_leak_rule_*`,
+5/5 mutants killed). The artifacts are NOT moved, so the remaining rows run in
+the same environment.
+
+The rule as written is kept as a SECONDARY result: every row records
+`valid_as_written`, `invalid_reasons_as_written` and `leaks_as_written`, and
+`analyze.py --as-written` reports the result under it. `run.py --rescore`
+applied both to the 87 rows: under the narrowed rule 0 are invalid (the 11 alt
+rows become valid), and under the rule as written the same 11 are invalid as
+before (the as-written column reproduces the original judgement on every row;
+no verdict changed).
+
+Why: the rule as written measured where the harness installed the alt arm's
+tools, not leakage, and only an arm with a shell can print that path. The
+narrowed rule counts more alt answers right, so it works against the server:
+it is the conservative choice for the primary. Disclosure: when the rule was
+chosen, these 11 rows' verdicts (all right) had been seen; no accuracy
+comparison between arms had been run.
