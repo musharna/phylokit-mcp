@@ -678,3 +678,30 @@ def test_a_high_seven_day_reading_stops_only_if_a_fresh_probe_agrees(
     assert len(probes) == n and gate.stopped is None
     gate.update([_rl("allowed", 0.9, 0.98)], "claude-haiku-5-5")
     assert gate.stopped is None and gate.until == 1060
+
+
+def test_every_row_records_the_load_average_at_its_start_and_end(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """PREREG_2026-10-20 deviation (2026-10-22): each row carries the 1-minute
+    load average, for a timeout as for a finished run."""
+    q = _questions()[0]
+    loads = iter([(7.5, 0, 0), (9.25, 0, 0)] * 2)
+    done = json.dumps({"type": "result", "subtype": "success", "result": "ANSWER: x"})
+
+    def fake_run(cmd: list[str], **kw: Any) -> Any:
+        return type("P", (), {"returncode": 0, "stdout": done + "\n"})()
+
+    def fake_timeout(cmd: list[str], **kw: Any) -> Any:
+        raise run.subprocess.TimeoutExpired(cmd, 1, output=b"")
+
+    monkeypatch.setattr(run, "RUNS", tmp_path)
+    monkeypatch.setattr(run.os, "getloadavg", lambda: next(loads))
+    monkeypatch.setattr(run.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(run, "arm_setup", lambda arm, tmp, spec: ([], {}))
+    monkeypatch.setattr(run.subprocess, "run", fake_run)
+    r = run.run_one("bare", q, 1)
+    assert (r["load1_start"], r["load1_end"], r["exit"]) == (7.5, 9.25, 0)
+    monkeypatch.setattr(run.subprocess, "run", fake_timeout)
+    r = run.run_one("bare", q, 2)
+    assert (r["load1_start"], r["load1_end"], r["exit"]) == (7.5, 9.25, "timeout")

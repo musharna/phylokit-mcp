@@ -236,3 +236,22 @@ reading stops it. Otherwise both readings are logged to `versions.json`
 reading + 0.66 probe continues; 0.98 + 0.95 stops). It fails on the old gate
 (mutate-run, 3/3 mutants killed). A real probe just before the commit read 0.67. Resume
 from bare q06 rep 2.
+
+### Load and outage (2026-10-22, 04:50 EDT, coordinator's decision for load; arm-neutral)
+
+- **Load.** From the next resume on, every row records the machine's
+  1-minute load average at the run's start and end (`load1_start`,
+  `load1_end`), timeouts included. The once-only re-runs at the end of the
+  sweep start only when the 1-minute load is below 22 (the core count). The
+  load is checked every 10 minutes for up to 2 hours, then the re-runs start
+  anyway. Why: mcp q01 rep 3 hit the 1,800 s timeout at a load of 32 to 37
+  from other sessions' jobs. The server's tree search runs on this machine,
+  so contention falls on the mcp arm. The 234 rows before this point carry no
+  load reading.
+- **DNS outage.** From about 04:15 EDT the machine could not resolve
+  `api.anthropic.com` (`EAI_AGAIN`). bare, alt and mcp q02 rep 3 ended in
+  `api_error` after about 450 s of retries. The sweep was stopped at 04:47
+  EDT (234 rows, all complete; the run in flight, bare q03 rep 3, left no
+  row). It resumes once the name resolves. Under the registered rule, the 3
+  API-error rows and the timed-out row (mcp q01 rep 3) are moved aside and
+  re-run once at the end.

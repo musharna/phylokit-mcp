@@ -529,6 +529,10 @@ def run_one(
             "--output-format", "stream-json", "--verbose", "--system-prompt", SYSTEM,
             *flags,
         ]  # fmt: skip
+        # The machine's 1-minute load average at the run's start and end
+        # (PREREG_2026-10-20 deviation, 2026-10-22): other jobs share the box,
+        # and the server's own computation runs on it.
+        load_start = round(os.getloadavg()[0], 2)
         t0 = time.monotonic()
         try:
             proc = subprocess.run(
@@ -549,6 +553,7 @@ def run_one(
             )
             rc = "timeout"
         seconds = round(time.monotonic() - t0, 1)
+        load_end = round(os.getloadavg()[0], 2)
     out.write_text(stdout)
     events = [json.loads(ln) for ln in stdout.splitlines() if ln.startswith("{")]
     init = next(
@@ -572,6 +577,8 @@ def run_one(
         "rep": rep,
         "exit": rc,
         "seconds": seconds,
+        "load1_start": load_start,
+        "load1_end": load_end,
         "claude_code": init.get("claude_code_version"),
         "model": init.get("model"),
         "mcp_servers": init.get("mcp_servers"),
@@ -934,7 +941,7 @@ def main() -> None:
             print(
                 f"[{n}/{len(todo)}] {r['arm']:4} {r['qid']} rep{r['rep']} {r['verdict']:9}"
                 f" exit={r['exit']} {r['seconds']}s calls={len(r['tool_calls'])}"
-                f" ${r['cost_usd']}",
+                f" ${r['cost_usd']} load={r['load1_start']}->{r['load1_end']}",
                 flush=True,
             )
     rows = [json.loads(ln) for ln in results.read_text().splitlines()]
