@@ -210,3 +210,13 @@ five_hour 0.49. The same command, environment and stop rule (seven_day ≥
 0.90) apply, with the narrowed leak rule as primary. Claude Code is now
 2.1.307 (the first 87 rows ran 2.1.306); the version is accepted, recorded in
 every row (`claude_code`), and reported. Sonnet does not start.
+
+### Second stop (2026-10-21, about 22:35 EDT, by the coordinator)
+
+Stopped at 129 rows on a seven_day 0.98 reading from a second weekly window.
+That reading came from another benchmark's transcripts; this harness's
+transcripts showed only the other weekly window (0.62 to 0.65), so its gate
+could not see it. The coordinator stopped the sweep with SIGTERM after run
+42 of 255 (mcp q05 rep 2). All 129 rows are complete (43 per arm, rep 1
+q01 to q38 and rep 2 q01 to q05). The run in flight (bare q06 rep 2) left no
+row and no transcript, and it will run again on resume.
