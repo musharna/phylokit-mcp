@@ -285,3 +285,4 @@ from bare q06 rep 2.
   stops cleanly: no new run starts and finished rows stay. A run already in
   flight when DNS fails can still end in an outage error; such rows are set
   aside by time window as outage rows, as with q02 rep 3.
+- **Third stop (2026-10-22, 15:34 EDT, the registered gate).** After resuming at 14:55, the sweep wrote 3 rows (243 in all). Then the gate stopped it at seven_day 0.90, confirmed by its fresh probe (0.90). The last row, mcp q05 rep 3, is a registered timeout: Haiku asked `infer_tree` for 100 replicates, past the 1,827 s silent-tool limit, and there was no network error. The sweep resumes on the coordinator's word after the weekly reset (Sat 10-24, 23:00 EDT).
