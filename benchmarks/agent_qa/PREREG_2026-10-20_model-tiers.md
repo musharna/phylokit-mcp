@@ -221,7 +221,7 @@ could not see it. The coordinator stopped the sweep with SIGTERM after run
 q01 to q38 and rep 2 q01 to q05). The run in flight (bare q06 rep 2) left no
 row and no transcript, and it will run again on resume.
 
-### Gate change and resume (2026-10-21, 22:47 EDT, coordinator's decision, before any more rows)
+### Gate change and resume (2026-10-21, committed 22:45:35 EDT, coordinator's decision, before any more rows)
 
 The user's /usage reads 66% weekly, so the Sat 23:00 window is the binding
 limit and the 0.98 readings (Sun 12:00 window) are judged spurious. From
@@ -234,5 +234,5 @@ reading stops it. Otherwise both readings are logged to `versions.json`
 (primary) and Claude Code 2.1.307 are unchanged. Test:
 `test_a_high_seven_day_reading_stops_only_if_a_fresh_probe_agrees` (0.98
 reading + 0.66 probe continues; 0.98 + 0.95 stops). It fails on the old gate
-(mutate-run, 3/3 mutants killed). A real probe at 22:46 read 0.67. Resume
+(mutate-run, 3/3 mutants killed). A real probe just before the commit read 0.67. Resume
 from bare q06 rep 2.
