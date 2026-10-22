@@ -633,3 +633,48 @@ def test_the_narrowed_leak_rule_ignores_the_harness_tool_paths_and_nothing_else(
         r = v("alt", _events(ALT, [("Bash", {"command": "ls"})], [text]), 0)
         assert not r["valid"] and hit in r["leaks"], text
     assert run.mask_tool_paths(f"x {mafft} y") == "x <tool-path> y"
+
+
+def test_a_high_seven_day_reading_stops_only_if_a_fresh_probe_agrees(
+    monkeypatch: Any,
+) -> None:
+    """PREREG_2026-10-20 deviation (2026-10-21): a 0.98 reading from a window
+    /usage did not show stopped the sweep. Now a seven-day stop binds only if a
+    fresh probe also reads >= STOP_SEVEN_DAY; a probe with no reading stops."""
+    probes: list[str] = []
+
+    def probe(value: float | None) -> Any:
+        def f() -> float | None:
+            probes.append("probe")
+            return value
+
+        return f
+
+    monkeypatch.setattr(run, "MODEL", "claude-haiku-5-5")
+    high = [_rl("allowed", 0.3, 0.98)]
+    # 0.98 in the transcript, 0.66 from the probe: carry on, and log both.
+    monkeypatch.setattr(run, "probe_seven_day", probe(0.66), raising=False)
+    gate = run.Gate()
+    gate.update(high, "claude-haiku-5-5")
+    assert gate.stopped is None and gate.wait() is True and probes == ["probe"]
+    assert gate.log[-1]["action"] == "probe" and gate.log[-1]["probe"] == 0.66
+    # 0.98 in the transcript, 0.95 from the probe: stop.
+    monkeypatch.setattr(run, "probe_seven_day", probe(0.95), raising=False)
+    gate = run.Gate()
+    gate.update(high, "claude-haiku-5-5")
+    assert gate.stopped is not None and gate.stopped["seven_day"] == 0.95
+    assert gate.stopped["transcript_seven_day"] == 0.98 and gate.wait() is False
+    # A probe that reads nothing stops rather than guesses.
+    monkeypatch.setattr(run, "probe_seven_day", probe(None), raising=False)
+    gate = run.Gate()
+    gate.update(high, "claude-haiku-5-5")
+    assert gate.stopped is not None and "no seven_day" in gate.stopped["why"]
+    # Below the limit no probe is spent; a five-hour pause still holds after a
+    # probe that clears the seven-day stop.
+    n = len(probes)
+    monkeypatch.setattr(run, "probe_seven_day", probe(0.66), raising=False)
+    gate = run.Gate()
+    gate.update([_rl("allowed", 0.3, 0.5)], "claude-haiku-5-5")
+    assert len(probes) == n and gate.stopped is None
+    gate.update([_rl("allowed", 0.9, 0.98)], "claude-haiku-5-5")
+    assert gate.stopped is None and gate.until == 1060

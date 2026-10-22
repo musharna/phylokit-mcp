@@ -220,3 +220,19 @@ could not see it. The coordinator stopped the sweep with SIGTERM after run
 42 of 255 (mcp q05 rep 2). All 129 rows are complete (43 per arm, rep 1
 q01 to q38 and rep 2 q01 to q05). The run in flight (bare q06 rep 2) left no
 row and no transcript, and it will run again on resume.
+
+### Gate change and resume (2026-10-21, 22:47 EDT, coordinator's decision, before any more rows)
+
+The user's /usage reads 66% weekly, so the Sat 23:00 window is the binding
+limit and the 0.98 readings (Sun 12:00 window) are judged spurious. From
+here on, a transcript's seven_day >= 0.90 triggers a fresh probe
+(`claude -p "say ok" --model claude-haiku-5-5 --output-format stream-json --verbose`,
+the newest event's `unifiedWindows.seven_day`; `run.probe_seven_day`). The
+sweep stops only if the probe also reads >= 0.90. A probe that gives no
+reading stops it. Otherwise both readings are logged to `versions.json`
+(`usage_gate`) and the sweep continues. The five-hour pause, the narrowed leak rule
+(primary) and Claude Code 2.1.307 are unchanged. Test:
+`test_a_high_seven_day_reading_stops_only_if_a_fresh_probe_agrees` (0.98
+reading + 0.66 probe continues; 0.98 + 0.95 stops). It fails on the old gate
+(mutate-run, 3/3 mutants killed). A real probe at 22:46 read 0.67. Resume
+from bare q06 rep 2.

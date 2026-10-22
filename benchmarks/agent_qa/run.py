@@ -590,11 +590,14 @@ def run_one(
     }
 
 
-def usage_gate(events: list[dict[str, Any]]) -> tuple[str | None, dict[str, Any]]:
+def usage_gate(
+    events: list[dict[str, Any]], seven_day: float | None = None
+) -> tuple[str | None, dict[str, Any]]:
     """What the run's last ``rate_limit_event`` asks of the sweep: ``"stop"``
     (seven-day use >= STOP_SEVEN_DAY), ``"pause"`` (a rejected request, or
     five-hour use >= PAUSE_FIVE_HOUR; ``until`` is when that window resets), or
-    None; and the reading. A pause with no reset time to wait for is a stop."""
+    None; and the reading. A pause with no reset time to wait for is a stop.
+    ``seven_day`` replaces the transcript's seven-day reading (a fresh probe's)."""
     info = next(
         (
             e.get("rate_limit_info") or {}
@@ -612,7 +615,9 @@ def usage_gate(events: list[dict[str, Any]]) -> tuple[str | None, dict[str, Any]
         "five_hour": five.get("utilization"),
         "seven_day": seven.get("utilization"),
     }
-    if (seven.get("utilization") or 0) >= STOP_SEVEN_DAY:
+    if seven_day is not None:
+        rec["seven_day"] = seven_day
+    if (rec["seven_day"] or 0) >= STOP_SEVEN_DAY:
         return "stop", rec
     rejected = info.get("status") == "rejected"
     if rejected or (five.get("utilization") or 0) >= PAUSE_FIVE_HOUR:
@@ -621,6 +626,37 @@ def usage_gate(events: list[dict[str, Any]]) -> tuple[str | None, dict[str, Any]
             return "stop", rec | {"why": "pause with no resetsAt"}
         return "pause", rec | {"until": until}
     return None, rec
+
+
+def probe_seven_day() -> float | None:
+    """A fresh seven-day reading: one tiny ``claude -p`` call on MODEL, the
+    newest ``rate_limit_event``'s ``unifiedWindows.seven_day``. None if the call
+    gave no reading (the gate then stops: no guess).
+
+    Why (PREREG_2026-10-20 deviation, 2026-10-21): runs on this account have
+    read seven_day 0.98 from a window the account's own /usage did not show
+    (66%), while other transcripts read 0.62-0.65; one high reading stopped
+    sweeps that had headroom."""
+    claude = shutil.which("claude")
+    if claude is None:
+        raise SystemExit("claude not found on PATH")
+    with tempfile.TemporaryDirectory(prefix="phyloqa-probe-") as d:
+        out = subprocess.run(
+            [claude, "-p", "say ok", "--model", MODEL,
+             "--output-format", "stream-json", "--verbose"],
+            cwd=d, capture_output=True, text=True, timeout=180, check=False,
+        ).stdout  # fmt: skip
+    events = [json.loads(ln) for ln in out.splitlines() if ln.startswith("{")]
+    info = next(
+        (
+            e.get("rate_limit_info") or {}
+            for e in reversed(events)
+            if e.get("type") == "rate_limit_event"
+        ),
+        {},
+    )
+    got = ((info.get("unifiedWindows") or {}).get("seven_day") or {}).get("utilization")
+    return float(got) if isinstance(got, (int, float)) else None
 
 
 class Gate:
@@ -647,6 +683,20 @@ class Gate:
     def update(self, events: list[dict[str, Any]], served: str | None) -> None:
         now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         action, rec = usage_gate(events)
+        if action == "stop" and "why" not in rec:
+            # A seven-day stop is confirmed by a fresh probe before it binds.
+            probe = probe_seven_day()
+            seen = rec["seven_day"]
+            with self.lock:
+                self.log.append(
+                    {"action": "probe", "at": now, "reading": rec, "probe": probe}
+                )
+            print(f"USAGE GATE: seven_day {seen}; probe reads {probe}", flush=True)
+            if probe is None:
+                rec = rec | {"why": "the probe gave no seven_day reading"}
+            else:
+                action, rec = usage_gate(events, seven_day=probe)
+                rec = rec | {"transcript_seven_day": seen}
         if served is not None and served != MODEL:
             action, rec = "stop", rec | {"why": f"served by {served}, not {MODEL}"}
         with self.lock:
