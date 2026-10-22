@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import ast
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 
 BENCH = Path(__file__).resolve().parent.parent / "benchmarks" / "agent_qa"
 sys.path.insert(0, str(BENCH))
@@ -705,3 +707,48 @@ def test_every_row_records_the_load_average_at_its_start_and_end(
     monkeypatch.setattr(run.subprocess, "run", fake_timeout)
     r = run.run_one("bare", q, 2)
     assert (r["load1_start"], r["load1_end"], r["exit"]) == (7.5, 9.25, "timeout")
+
+
+def test_a_failed_dns_precheck_stops_the_sweep_before_the_run_starts(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """PREREG_2026-10-20 deviation (2026-10-22): with --dns-precheck, a run
+    starts only if its host resolves; otherwise the gate stops and no later
+    run starts."""
+    calls: list[str] = []
+
+    def fake_run_one(arm: str, q: dict, rep: int, spec: str) -> dict:
+        calls.append(q["id"])
+        path = run.transcript(arm, q["id"], rep)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(_rl("allowed", 0.1, 0.1)) + "\n")
+        return {"model": "claude-haiku-5-5"}
+
+    up = {"ok": True}
+    monkeypatch.setattr(run, "RUNS", tmp_path)
+    monkeypatch.setattr(run, "MODEL", "claude-haiku-5-5")
+    monkeypatch.setattr(run, "run_one", fake_run_one)
+    monkeypatch.setattr(run, "resolves", lambda host: (up["ok"], "fake"))
+    monkeypatch.setattr(run, "DNS_HOST", "api.anthropic.com")
+    gate = run.Gate()
+    # Resolves: the run starts and the gate stays open.
+    assert run.gated_run(gate, "mcp", {"id": "q01"}, 1, run.SERVER) is not None
+    assert gate.stopped is None
+    # Does not resolve: this run never starts, the gate stops, and so do later runs.
+    up["ok"] = False
+    assert run.gated_run(gate, "mcp", {"id": "q02"}, 1, run.SERVER) is None
+    assert gate.stopped is not None and "DNS: api.anthropic.com" in gate.stopped["why"]
+    up["ok"] = True
+    assert run.gated_run(gate, "mcp", {"id": "q03"}, 1, run.SERVER) is None
+    assert calls == ["q01"]
+    # Off by default: no host, no check.
+    monkeypatch.setattr(run, "DNS_HOST", None)
+    up["ok"] = False
+    assert run.gated_run(run.Gate(), "mcp", {"id": "q04"}, 1, run.SERVER) is not None
+
+
+@pytest.mark.skipif(shutil.which("getent") is None, reason="needs getent")
+def test_resolves_drives_the_real_getent() -> None:
+    """Real execution: localhost resolves from /etc/hosts; .invalid never does."""
+    assert run.resolves("localhost")[0] is True
+    assert run.resolves("phyloqa-dns-check.invalid")[0] is False

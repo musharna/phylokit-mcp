@@ -265,3 +265,23 @@ from bare q06 rep 2.
   as to every row. The timed-out row (mcp q01 rep 3, load 32 to 37) is not an
   outage row; it gets the registered single re-run at the end. 231 rows
   remain in `results.jsonl`.
+
+### Second DNS outage and DNS precheck (2026-10-22, recorded 15:00 EDT, coordinator's decision; arm-neutral, before any analysis)
+
+- **Second outage.** The sweep resumed at 05:35 EDT and wrote 9 rows (240 in
+  all). At 06:4x it entered a registered five-hour pause (five_hour 0.88,
+  seven_day 0.87; until 08:20 EDT). DNS failed again at about 06:48 and the
+  coordinator stopped the sweep in that pause at 06:58 (SIGTERM; no run in
+  flight, no half-written row; the pause entry is in the sweep log, not in
+  `versions.json`). The timed-out mcp q04 rep 3 row (06:15:15 to 06:45:38
+  EDT, load 17 to 18) is NOT an outage row: its window ends before 06:48, its
+  transcript has no network error, and its last API call answered at 06:45:34.
+  It timed out because Haiku asked `infer_tree` for 100 bootstrap replicates,
+  which ran past Claude Code's 1,815 s silent-tool limit. It stays a
+  registered timeout and gets the single re-run at the end.
+- **DNS precheck.** From the next resume on, `getent hosts api.anthropic.com`
+  runs before each run (`run.py --dns-precheck`, inside the usage gate, after
+  any pause) and before each pass of the resume script. On failure the sweep
+  stops cleanly: no new run starts and finished rows stay. A run already in
+  flight when DNS fails can still end in an outage error; such rows are set
+  aside by time window as outage rows, as with q02 rep 3.

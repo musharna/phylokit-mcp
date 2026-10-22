@@ -666,9 +666,30 @@ def probe_seven_day() -> float | None:
     return float(got) if isinstance(got, (int, float)) else None
 
 
+# Host checked before each run (--dns-precheck); None checks nothing.
+DNS_HOST: str | None = None
+
+
+def resolves(host: str) -> tuple[bool, str]:
+    """Whether ``getent hosts <host>`` resolves it, and what it said.
+
+    Why (PREREG_2026-10-20 deviation, 2026-10-22): twice a VPN change broke
+    DNS mid-sweep (EAI_AGAIN), and the runs that started into it failed for
+    the network, not the model."""
+    try:
+        out = subprocess.run(
+            ["getent", "hosts", host], capture_output=True, text=True, timeout=15,
+            check=False,
+        )  # fmt: skip
+    except subprocess.TimeoutExpired:
+        return False, "getent timed out after 15 s"
+    return out.returncode == 0, f"getent exit {out.returncode} {out.stdout.strip()}"
+
+
 class Gate:
     """Holds or stops the runs not yet started, from each finished run's
-    transcript (``usage_gate``) and the model that served it."""
+    transcript (``usage_gate``), the model that served it and, before each
+    run, whether DNS resolves (``dns_ok``)."""
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
@@ -686,6 +707,21 @@ class Gate:
             if left <= 0:
                 return True
             time.sleep(min(left, 60))
+
+    def dns_ok(self, host: str) -> bool:
+        """True if ``host`` resolves; otherwise stop the gate (no later run starts)."""
+        ok, said = resolves(host)
+        if not ok:
+            with self.lock:
+                if self.stopped is None:
+                    self.stopped = {
+                        "action": "stop",
+                        "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                        "why": f"DNS: {host} did not resolve ({said})",
+                    }
+                    self.log.append(self.stopped)
+                    print(f"DNS STOP: {self.stopped}", flush=True)
+        return ok
 
     def update(self, events: list[dict[str, Any]], served: str | None) -> None:
         now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -722,6 +758,8 @@ def gated_run(
 ) -> dict[str, Any] | None:
     """``run_one`` once the gate allows it; None (not run) once it has stopped."""
     if not gate.wait():
+        return None
+    if DNS_HOST and not gate.dns_ok(DNS_HOST):
         return None
     r = run_one(arm, q, rep, spec)
     path = transcript(arm, q["id"], rep)
@@ -834,6 +872,13 @@ def main() -> None:
     )
     ap.add_argument("--model", default=MODEL, help=f"claude --model (default {MODEL})")
     ap.add_argument(
+        "--dns-precheck",
+        default="",
+        metavar="HOST",
+        help="before each run, stop the sweep (no later run starts) if "
+        "`getent hosts HOST` fails",
+    )
+    ap.add_argument(
         "--versions",
         default="",
         help="write what each arm ran on to this JSON file (default: versions.json "
@@ -855,6 +900,8 @@ def main() -> None:
     )
     a = ap.parse_args()
     set_model(a.model)
+    global DNS_HOST
+    DNS_HOST = a.dns_precheck or None
     if a.setup_alt:
         setup_alt()
         return
@@ -949,7 +996,7 @@ def main() -> None:
     versions["usage_gate"] = versions.get("usage_gate", []) + gate.log
     vpath.write_text(json.dumps(versions, indent=2) + "\n")
     if gate.stopped is not None:
-        raise SystemExit(f"stopped by the usage gate: {gate.stopped}")
+        raise SystemExit(f"stopped by the gate: {gate.stopped}")
     sys.exit(0)
 
 
