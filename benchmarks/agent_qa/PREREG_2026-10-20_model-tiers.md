@@ -201,3 +201,12 @@ narrowed rule counts more alt answers right, so it works against the server:
 it is the conservative choice for the primary. Disclosure: when the rule was
 chosen, these 11 rows' verdicts (all right) had been seen; no accuracy
 comparison between arms had been run.
+
+### Resume (2026-10-21, 20:20 EDT, coordinator's decision)
+
+The Haiku sweep resumes from q30 rep 1 before the Sun 10-25 reset: the
+seven-day window rolls, and a live probe at 18:12 EDT read seven_day 0.57 and
+five_hour 0.49. The same command, environment and stop rule (seven_day ≥
+0.90) apply, with the narrowed leak rule as primary. Claude Code is now
+2.1.307 (the first 87 rows ran 2.1.306); the version is accepted, recorded in
+every row (`claude_code`), and reported. Sonnet does not start.
