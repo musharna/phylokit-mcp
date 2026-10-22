@@ -252,6 +252,16 @@ from bare q06 rep 2.
   `api.anthropic.com` (`EAI_AGAIN`). bare, alt and mcp q02 rep 3 ended in
   `api_error` after about 450 s of retries. The sweep was stopped at 04:47
   EDT (234 rows, all complete; the run in flight, bare q03 rep 3, left no
-  row). It resumes once the name resolves. Under the registered rule, the 3
-  API-error rows and the timed-out row (mcp q01 rep 3) are moved aside and
-  re-run once at the end.
+  row). The cause was the Windows-side VPN's tunnel mode breaking WSL's DNS
+  proxy. The sweep resumes on the coordinator's message, not when the name
+  resolves again. The 3 outage rows (bare, alt and mcp q02 rep 3; each
+  transcript ends `API Error: Can't reach the API server ... (EAI_AGAIN)`)
+  are outage failures, NOT the registered single re-run. At 05:15 EDT they
+  were moved to `results.outage_2026-10-22.jsonl` (marked `outage`). Their
+  transcripts were copied to
+  `~/phylokit-mcp-artifacts/agent_qa/model-tiers-2026-10-20/outage-2026-10-22/`,
+  and the resumed sweep runs those triples fresh. The registered rule
+  (`--drop-api-failures`, then one re-run) still applies to them afterwards,
+  as to every row. The timed-out row (mcp q01 rep 3, load 32 to 37) is not an
+  outage row; it gets the registered single re-run at the end. 231 rows
+  remain in `results.jsonl`.
