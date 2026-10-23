@@ -686,6 +686,26 @@ def resolves(host: str) -> tuple[bool, str]:
     return out.returncode == 0, f"getent exit {out.returncode} {out.stdout.strip()}"
 
 
+def spend_stop() -> str | None:
+    """Why an API-billed sweep must stop before its next run, or None.
+
+    Set ``BENCH_SPEND_GATE`` to the shared spend meter's script and each run
+    first asks it (``check``, track from ``BENCH_TRACK``); any non-zero exit
+    (spend cap, billing violation, checkpoint) stops the sweep cleanly.
+    """
+    gate = os.environ.get("BENCH_SPEND_GATE")
+    if not gate:
+        return None
+    p = subprocess.run(
+        [sys.executable, gate, "check"], capture_output=True, text=True, check=False
+    )
+    return (
+        None
+        if p.returncode == 0
+        else (p.stderr.strip() or f"spend gate exit {p.returncode}")
+    )
+
+
 class Gate:
     """Holds or stops the runs not yet started, from each finished run's
     transcript (``usage_gate``), the model that served it and, before each
@@ -722,6 +742,21 @@ class Gate:
                     self.log.append(self.stopped)
                     print(f"DNS STOP: {self.stopped}", flush=True)
         return ok
+
+    def spend_ok(self) -> bool:
+        """True unless the API spend gate says stop; then stop the gate."""
+        why = spend_stop()
+        if why:
+            with self.lock:
+                if self.stopped is None:
+                    self.stopped = {
+                        "action": "stop",
+                        "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                        "why": f"spend gate: {why}",
+                    }
+                    self.log.append(self.stopped)
+                    print(f"SPEND STOP: {self.stopped}", flush=True)
+        return not why
 
     def update(self, events: list[dict[str, Any]], served: str | None) -> None:
         now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -760,6 +795,8 @@ def gated_run(
     if not gate.wait():
         return None
     if DNS_HOST and not gate.dns_ok(DNS_HOST):
+        return None
+    if not gate.spend_ok():
         return None
     r = run_one(arm, q, rep, spec)
     path = transcript(arm, q["id"], rep)

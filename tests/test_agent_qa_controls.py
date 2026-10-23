@@ -752,3 +752,38 @@ def test_resolves_drives_the_real_getent() -> None:
     """Real execution: localhost resolves from /etc/hosts; .invalid never does."""
     assert run.resolves("localhost")[0] is True
     assert run.resolves("phyloqa-dns-check.invalid")[0] is False
+
+
+def test_spend_gate_stops_the_sweep_before_a_run(tmp_path: Path, monkeypatch) -> None:
+    """API-billed sweeps (2026-10-23): with BENCH_SPEND_GATE set, a run starts
+    only if the spend meter's ``check`` exits 0; otherwise the gate stops and
+    no later run starts. Unset, nothing changes."""
+    calls: list[str] = []
+
+    def fake_run_one(arm: str, q: dict, rep: int, spec: str) -> dict:
+        calls.append(q["id"])
+        path = run.transcript(arm, q["id"], rep)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(_rl("allowed", 0.1, 0.1)) + "\n")
+        return {"model": "claude-haiku-5-5"}
+
+    gate_py = tmp_path / "gate.py"
+    gate_py.write_text("import os, sys\nprint('cap reached', file=sys.stderr)\nsys.exit(int(os.environ['GATE_RC']))\n")
+    monkeypatch.setattr(run, "RUNS", tmp_path)
+    monkeypatch.setattr(run, "MODEL", "claude-haiku-5-5")
+    monkeypatch.setattr(run, "run_one", fake_run_one)
+    monkeypatch.setattr(run, "DNS_HOST", None)
+    monkeypatch.setenv("BENCH_SPEND_GATE", str(gate_py))
+    gate = run.Gate()
+    monkeypatch.setenv("GATE_RC", "0")  # under the cap: the run starts
+    assert run.gated_run(gate, "mcp", {"id": "q01"}, 1, run.SERVER) is not None
+    assert gate.stopped is None
+    monkeypatch.setenv("GATE_RC", "3")  # at the cap: no run starts, the gate stops
+    assert run.gated_run(gate, "mcp", {"id": "q02"}, 1, run.SERVER) is None
+    assert gate.stopped is not None and "spend gate: cap reached" in gate.stopped["why"]
+    monkeypatch.setenv("GATE_RC", "0")
+    assert run.gated_run(gate, "mcp", {"id": "q03"}, 1, run.SERVER) is None
+    assert calls == ["q01"]
+    monkeypatch.delenv("BENCH_SPEND_GATE")  # unset: subscription sweeps unchanged
+    monkeypatch.setenv("GATE_RC", "3")
+    assert run.gated_run(run.Gate(), "mcp", {"id": "q04"}, 1, run.SERVER) is not None
