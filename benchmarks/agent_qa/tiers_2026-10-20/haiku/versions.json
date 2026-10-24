@@ -1,0 +1,63 @@
+{
+  "arms": [
+    "bare",
+    "alt",
+    "mcp"
+  ],
+  "model": "claude-haiku-5-5",
+  "alt": {
+    "piqtree": "0.8.3",
+    "cogent3": "2026.7.30a0",
+    "numpy": "2.4.6"
+  },
+  "server_spec": "phylokit-mcp==0.7.0",
+  "mcp": {
+    "piqtree": "0.8.3",
+    "cogent3": "2026.7.30a0",
+    "numpy": "2.4.6",
+    "phylokit-mcp": "0.7.0",
+    "commit": null
+  },
+  "mafft": "v7.526 (2024/Apr/26)",
+  "claude_code": "2.1.310 (Claude Code)",
+  "started": "2026-10-20T23:03:38-0400",
+  "usage_gate": [
+    {
+      "action": "stop",
+      "at": "2026-10-21T00:17:36-0400",
+      "status": "allowed_warning",
+      "five_hour": 0.73,
+      "seven_day": 0.9
+    },
+    {
+      "action": "probe",
+      "at": "2026-10-22T15:34:08-0400",
+      "reading": {
+        "status": "allowed_warning",
+        "five_hour": 0.1,
+        "seven_day": 0.9
+      },
+      "probe": 0.9
+    },
+    {
+      "action": "stop",
+      "at": "2026-10-22T15:34:08-0400",
+      "status": "allowed_warning",
+      "five_hour": 0.1,
+      "seven_day": 0.9,
+      "transcript_seven_day": 0.9
+    }
+  ],
+  "resumed": [
+    "2026-10-21T20:19:20-0400",
+    "2026-10-21T22:45:44-0400",
+    "2026-10-22T05:35:40-0400",
+    "2026-10-22T14:55:43-0400",
+    "2026-10-23T20:38:44-0400",
+    "2026-10-23T21:02:31-0400",
+    "2026-10-23T21:36:36-0400"
+  ],
+  "model_served": [
+    "claude-haiku-5-5"
+  ]
+}
