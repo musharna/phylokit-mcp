@@ -768,7 +768,9 @@ def test_spend_gate_stops_the_sweep_before_a_run(tmp_path: Path, monkeypatch) ->
         return {"model": "claude-haiku-5-5"}
 
     gate_py = tmp_path / "gate.py"
-    gate_py.write_text("import os, sys\nprint('cap reached', file=sys.stderr)\nsys.exit(int(os.environ['GATE_RC']))\n")
+    gate_py.write_text(
+        "import os, sys\nprint('cap reached', file=sys.stderr)\nsys.exit(int(os.environ['GATE_RC']))\n"
+    )
     monkeypatch.setattr(run, "RUNS", tmp_path)
     monkeypatch.setattr(run, "MODEL", "claude-haiku-5-5")
     monkeypatch.setattr(run, "run_one", fake_run_one)
