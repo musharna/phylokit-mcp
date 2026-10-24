@@ -17,6 +17,15 @@ Writes, next to the first results file:
   sign test (McNemar's exact test) on them, and the per-question ratio of
   median seconds and median cost with a bootstrap 95% interval.
 - ``baselines.tsv``: every baseline's answer and verdict, per question.
+- with ``--substitute=<results.jsonl>`` (another model's rows, e.g. the
+  2026-10-18 Opus re-run): ``substitute.tsv``, this file's ``mcp`` arm against
+  that file's ``alt`` arm (``other_alt``), paired the same way. Not concurrent:
+  report it as a secondary comparison only.
+
+PREREG_2026-10-20_model-tiers.md's primary endpoint per model tier is the
+paired accuracy columns of ``paired.tsv`` (alt vs mcp): questions right in
+every run, McNemar's exact test on the discordant questions, and a bootstrap
+95% interval of the difference; ``tier_rule`` combines the tiers (Holm).
 
 An invalid row (``run.py``'s ``validity``) counts as not right: one rule for
 every arm. ``accuracy_valid_only`` is the same share over valid rows alone.
@@ -82,6 +91,11 @@ def bootstrap(
     return float(lo), float(hi)
 
 
+def server_calls(r: dict[str, Any]) -> int:
+    """Calls this run made to the server's tools (``mcp__phylokit__*``)."""
+    return sum(t.startswith("mcp__phylokit__") for t in r["tool_calls"])
+
+
 def _ok(r: dict[str, Any]) -> bool:
     return r["verdict"] == "right" and r.get("valid", True)
 
@@ -137,6 +151,14 @@ def arm_rows(
             seconds_max=max(r["seconds"] for r in mine),
             tool_calls_mean=float(np.mean([len(r["tool_calls"]) for r in mine])),
         )
+        if arm == "mcp":
+            # The mechanism: did the server arm call the server at all?
+            n_srv = [server_calls(r) for r in mine]
+            row.update(
+                server_calls_mean=float(np.mean(n_srv)),
+                server_calls_median=float(np.median(n_srv)),
+                runs_without_server_call=sum(n == 0 for n in n_srv),
+            )
         out.append(row)
         # No subset row on results that hold none of its kinds (it is undefined).
         sq = sorted({r["qid"] for r in mine if r["category"] in NEEDS_COMPUTE})
@@ -217,13 +239,15 @@ def baseline_rows(
 
 
 def paired_rows(
-    rows: list[dict[str, Any]], rng: np.random.Generator
+    rows: list[dict[str, Any]],
+    rng: np.random.Generator,
+    pairs: list[tuple[str, str]] = PAIRS,
 ) -> list[dict[str, Any]]:
     out = []
     arms = {r["arm"] for r in rows}
     cat = {r["qid"]: r["category"] for r in rows}
     for subset in ("all", SUBSET):
-        for a, b in PAIRS:
+        for a, b in pairs:
             if a not in arms or b not in arms:
                 continue
             qa: dict[str, list[dict[str, Any]]] = {}
@@ -266,6 +290,14 @@ def paired_rows(
                 > np.median([r["cost_usd"] for r in qa[q]])
                 for q in qids
             )
+
+            def diff(qs: list[str], ra: dict = ra, rb: dict = rb) -> float:
+                return float(sum(rb[q] for q in qs) - sum(ra[q] for q in qs))
+
+            # Its own generator, seeded alike, so adding this interval leaves
+            # every interval drawn from ``rng`` (the 10-16 and 10-18 tables) as
+            # it was.
+            diff_ci = bootstrap(qids, diff, np.random.default_rng(SEED))
             out.append(
                 {
                     "a": a,
@@ -287,9 +319,63 @@ def paired_rows(
                     "cost_ratio_ci": bootstrap(qids, ratio("cost_usd"), rng),
                     "questions_b_costlier": costlier,
                     "cost_sign_test_p": sign_test(costlier, len(qids) - costlier),
+                    "right_every_run_diff_b_minus_a": b_only - a_only,
+                    "right_every_run_diff_ci": diff_ci,
                 }
             )
     return out
+
+
+def holm(ps: dict[str, float]) -> dict[str, float]:
+    """Holm-adjusted p values (step-down, monotone, capped at 1)."""
+    order = sorted(ps, key=ps.__getitem__)
+    adj: dict[str, float] = {}
+    run = 0.0
+    for i, k in enumerate(order):
+        run = max(run, min(1.0, (len(order) - i) * ps[k]))
+        adj[k] = run
+    return adj
+
+
+def holm_family(ps: dict[str, float], expected: int = 2) -> dict[str, float]:
+    """Holm over the planned family: missing tiers are padded with p = 1, so a
+    partial family is adjusted as conservatively as the full one could be."""
+    pad = {f"_missing{i}": 1.0 for i in range(expected - len(ps))}
+    adj = holm(ps | pad)
+    return {t: adj[t] for t in ps}
+
+
+def tier_rule(
+    tiers: dict[str, dict[str, Any]], expected: int = 2, alpha: float = 0.05
+) -> tuple[str, dict[str, str]]:
+    """PREREG_2026-10-20_model-tiers' rule for the server (b) against alt (a)
+    on accuracy, from each tier's ``paired.tsv`` row (alt vs mcp, all questions).
+
+    Per tier, with McNemar's exact p Holm-adjusted across the tiers: a LIFT is
+    adjusted p < alpha, more questions right in every run only with the server
+    (b_only > a_only) and the bootstrap 95% CI of the difference wholly above
+    0; a DROP is the mirror image; anything else is NONE. Over the tiers: WIN
+    is a lift at one tier or more and no drop; LOSS a drop and no lift; MIXED
+    both; TIE neither. Until all ``expected`` tiers are in, the verdict is
+    PENDING (the per-tier calls use the Holm factor of the full family, so a
+    lone tier is never judged on its raw p).
+    """
+    adj = holm_family({t: p["sign_test_p"] for t, p in tiers.items()}, expected)
+    calls: dict[str, str] = {}
+    for t, p in tiers.items():
+        lo, hi = p["right_every_run_diff_ci"]
+        sig = adj[t] < alpha
+        if sig and p["b_only"] > p["a_only"] and lo > 0:
+            calls[t] = "LIFT"
+        elif sig and p["a_only"] > p["b_only"] and hi < 0:
+            calls[t] = "DROP"
+        else:
+            calls[t] = "NONE"
+    if len(tiers) < expected:
+        return "PENDING", calls
+    lift, drop = "LIFT" in calls.values(), "DROP" in calls.values()
+    verdict = {(True, False): "WIN", (False, True): "LOSS", (True, True): "MIXED"}
+    return verdict.get((lift, drop), "TIE"), calls
 
 
 def win_rule(p: dict[str, Any], margin: int = 2, alpha: float = 0.05) -> str:
@@ -335,10 +421,64 @@ def write_tsv(path: Path, rows: list[dict[str, Any]]) -> None:
         w.writerows(flat)
 
 
+def read_tier(path: Path) -> dict[str, Any]:
+    """A tier's alt-vs-mcp, all-questions paired row, recomputed at full
+    precision from its results.jsonl (paired.tsv rounds to 4 digits). The
+    difference CI has its own seeded generator, so it equals paired.tsv's."""
+    rows = [json.loads(ln) for ln in path.read_text().splitlines()]
+    (p,) = [
+        p
+        for p in paired_rows(rows, np.random.default_rng(SEED), [("alt", "mcp")])
+        if p["subset"] == "all"
+    ]
+    return p
+
+
+def tiers_main(spec: str) -> None:
+    """``--tiers=haiku=<results.jsonl>,sonnet=<results.jsonl>``: Holm and the
+    verdict; the Holm p printed is the one ``tier_rule`` decides on."""
+    tiers = {
+        name: read_tier(Path(path))
+        for name, path in (x.split("=", 1) for x in spec.split(","))
+    }
+    adj = holm_family({t: p["sign_test_p"] for t, p in tiers.items()})
+    verdict, calls = tier_rule(tiers)
+    for t, p in tiers.items():
+        print(
+            f"{t}: mcp-only {p['b_only']}, alt-only {p['a_only']}, raw p="
+            f"{p['sign_test_p']:.3g}, Holm p={adj[t]:.3g}, diff CI "
+            f"{p['right_every_run_diff_ci']}: {calls[t]}"
+        )
+    print(f"tier rule (PREREG_2026-10-20_model-tiers): {verdict}")
+
+
+def as_written(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows judged by the leak rule as written before 2026-10-21 (the
+    secondary result); a row without that judgement is an error."""
+    missing = [r for r in rows if "valid_as_written" not in r]
+    if missing:
+        raise SystemExit(f"{len(missing)} rows lack valid_as_written: run.py --rescore")
+    return [r | {"valid": r["valid_as_written"]} for r in rows]
+
+
 def main(argv: list[str]) -> None:
+    written = "--as-written" in argv
+    argv = [x for x in argv if x != "--as-written"]
+    tiers = [x.split("=", 1)[1] for x in argv if x.startswith("--tiers=")]
+    if tiers:
+        tiers_main(tiers[0])
+        return
+    sub = [x.split("=", 1)[1] for x in argv if x.startswith("--substitute=")]
+    argv = [x for x in argv if not x.startswith("--substitute=")]
     paths = [Path(p) for p in argv[0].split(",")] if argv else [HERE / "results.jsonl"]
     outdir = Path(argv[1]) if len(argv) > 1 else paths[0].parent
     rows = [json.loads(ln) for p in paths for ln in p.read_text().splitlines()]
+    if written:
+        rows = as_written(rows)
+        # The secondary tables go beside the primary ones, never over them.
+        outdir = outdir / "as_written"
+        outdir.mkdir(exist_ok=True)
+        print(f"validity: the leak rule AS WRITTEN (secondary), tables in {outdir}")
     keys = [(r["arm"], r["qid"], r["rep"]) for r in rows]
     if len(set(keys)) != len(keys):
         raise SystemExit(f"a run appears twice across {[str(p) for p in paths]}")
@@ -369,6 +509,41 @@ def main(argv: list[str]) -> None:
         )
         if (p["a"], p["b"], p["subset"]) == ("alt", "mcp", "all"):
             print(f"win rule (PREREG_2026-10-18, cost endpoint): {win_rule(p)}")
+            lo, hi = p["right_every_run_diff_ci"]
+            print(
+                f"accuracy (PREREG_2026-10-20 tier endpoint): mcp - alt = "
+                f"{p['right_every_run_diff_b_minus_a']:+d} questions right in every run "
+                f"(95% CI {lo:+.0f} to {hi:+.0f}), McNemar exact raw p="
+                f"{p['sign_test_p']:.3g}; this tier alone: {tier_rule({'this': p})}"
+            )
+    for r in summary:
+        if r["level"] == "arm" and r["arm"] == "mcp":
+            print(
+                f"mechanism: server calls per mcp run mean {r['server_calls_mean']:.2f}, "
+                f"median {r['server_calls_median']:g}; runs with no server call "
+                f"{r['runs_without_server_call']} of {r['n']}"
+            )
+    if sub:
+        other = [
+            json.loads(ln) | {"arm": "other_alt"}
+            for ln in Path(sub[0]).read_text().splitlines()
+            if json.loads(ln)["arm"] == "alt"
+        ]
+        mine = [r for r in rows if r["arm"] == "mcp"]
+        srows = paired_rows(
+            mine + other, np.random.default_rng(SEED), [("other_alt", "mcp")]
+        )
+        write_tsv(outdir / "substitute.tsv", srows)
+        for p in srows:
+            lo, hi = p["right_every_run_diff_ci"]
+            print(
+                f"substitute [{p['subset']}] (NOT concurrent) mcp vs {sub[0]} alt: right "
+                f"every run {p['b_right_every_run']} vs {p['a_right_every_run']} of "
+                f"{p['questions']}, discordant {p['b_only']}:{p['a_only']}, "
+                f"p={p['sign_test_p']:.3g}, diff CI ({lo:+.0f}, {hi:+.0f}); cost "
+                f"x{p['cost_ratio_b_over_a']:.2f} "
+                f"{tuple(round(x, 2) for x in p['cost_ratio_ci'])}"
+            )
 
 
 if __name__ == "__main__":

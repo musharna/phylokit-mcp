@@ -137,6 +137,45 @@ replaces asking for `top_n=300` to find four models.
 - Cost of the sweep: $9.97, plus $0.02 for the rows the API ended, $0.06 for one
   pilot run and $0.16 for the exploratory runs.
 
+## Haiku and Sonnet re-run 2026-10-20
+
+Pre-registered in [`PREREG_2026-10-20_model-tiers.md`](PREREG_2026-10-20_model-tiers.md):
+the same 38 questions, all three setups re-run on Claude Haiku 5.5 and Sonnet 5.5, 3
+runs each, server `phylokit-mcp==0.7.0`. Haiku ran in several parts up to 10-23 (240 rows on the
+subscription, then 102 on an API key under a spend gate; Claude Code 2.1.306 to
+2.1.310, recorded per row); Sonnet ran 10-23 and 10-24 on the API key (2.1.310). The
+PREREG lists the outage set-asides and stops. Rows: [`tiers_2026-10-20/`](tiers_2026-10-20/).
+
+**Win rule across both tiers: TIE** (`analyze.py --tiers`). Holm-adjusted McNemar p:
+Haiku 0.75, Sonnet 0.75. No lift and no loss at either.
+
+| Questions right in all 3 runs, of 38 | Haiku | Sonnet |
+|---|---|---|
+| Claude alone | 0 | 0 |
+| Claude + Python (piqtree, cogent3) | 37 | 35 |
+| Claude + phylokit-mcp | 34 | 37 |
+
+- **Haiku:** 1 question only the server got right in all runs, 4 only Python; p = 0.375
+  raw, difference −3 (−8 to +1). Not a loss. 4 server runs were invalid because the
+  server failed to start, so no phylokit tool was offered (q32, q33, q34 rep 2 and q03
+  rep 3, all on Claude Code 2.1.308), and 1 Python run failed the leak scan (q25 rep 3).
+  3 server runs that timed out at 1,800 s (rep 3 of q04 and q05, where Haiku asked
+  `infer_tree` for 100 bootstrap replicates, and of q01, at a machine load of 32 to 37)
+  got the registered single re-run at the end and were right. Cost was the same (×1.00, 0.68 to 1.48).
+- **Sonnet:** 3 only the server, 1 only Python; p = 0.625, difference +2 (−2 to +6). 0
+  invalid. The server cost ×1.23 (0.93 to 1.66) and took ×1.80 the time (1.21 to 2.74).
+- **Mechanism:** server calls per server run, mean 1.14 (Haiku; 5 of 114 made none)
+  and 1.02 (Sonnet; 0 of 114 made none). On Sonnet every server run passed a file
+  path, 19 used `map_positions` and 24 named models.
+- **Substitute (secondary, non-concurrent):** against the 10-18 Opus Python arm, Haiku
+  with the server 34 against 35 (p = 1, cost ×0.06) and Sonnet with the server 37
+  against 35 (p = 0.625, cost ×0.47).
+- **Cost:** Haiku $0.59 (bare $0.03, Python $0.27, server $0.29); Sonnet $15.25, of
+  which Claude alone was $11.68: with no tools, Sonnet sometimes wrote tool calls as
+  plain text at length (85% of that arm's cost is output tokens).
+  `diagnose.py` ran on Sonnet only; on Haiku its token-price fit left a residual, so it
+  stopped without a cost breakdown.
+
 ## Controls
 
 `controls.py` and `run.py` hold these. Tests: `tests/test_agent_qa_score.py`,
