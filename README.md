@@ -94,7 +94,7 @@ If `uvx` picks a Python older than 3.12, use
 
 ## What the benchmark shows
 
-Claude was compared with itself writing Python in an environment we set up with
+Claude with the server was compared with Claude writing Python in an environment we set up with
 piqtree, cogent3 and MAFFT, on 38 phylogenetics questions, 3 runs each. A tie
 means the server matches that result without you building the environment.
 Questions right in every run, server against Python: Claude Haiku 5.5 34 against
