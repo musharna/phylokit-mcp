@@ -286,3 +286,26 @@ from bare q06 rep 2.
   flight when DNS fails can still end in an outage error; such rows are set
   aside by time window as outage rows, as with q02 rep 3.
 - **Third stop (2026-10-22, 15:34 EDT, the registered gate).** After resuming at 14:55, the sweep wrote 3 rows (243 in all). Then the gate stopped it at seven_day 0.90, confirmed by its fresh probe (0.90). The last row, mcp q05 rep 3, is a registered timeout: Haiku asked `infer_tree` for 100 replicates, past the 1,827 s silent-tool limit, and there was no network error. The sweep resumes on the coordinator's word after the weekly reset (Sat 10-24, 23:00 EDT).
+
+## Amendment, 2026-10-23 ~19:20 EDT: API billing (before any further run)
+
+- **Billing.** The user's decision: every remaining run in this design (both
+  tiers) bills an Anthropic API key, not the Claude subscription. Same model
+  IDs, prompts, arms, reps, harness and controls. Claude Code is 2.1.309 now
+  (recorded per row).
+- **How.** A benchmark-only `claude` wrapper, first on `PATH` for the sweep,
+  loads the key and then `exec`s the real CLI (so the harness's timeout still
+  kills Claude itself). It records each run's cost (Claude Code's
+  `total_cost_usd`; for a killed run, estimated from its token counts) and
+  refuses to start a run once the total reaches $171 of the user's $175 cap
+  (exit 75, no transcript). A run whose `init` event does not show
+  `apiKeySource: ANTHROPIC_API_KEY` stops every later launch.
+- **Gate.** API calls report no subscription windows, so the seven-day stop
+  and the five-hour pause no longer fire. `run.py` instead asks the spend gate
+  (`BENCH_SPEND_GATE`) before every run and, on a refusal, stops cleanly as
+  at the seven-day stop: finished rows stay, nothing new starts. Test added,
+  seen to fail with the check disabled (`mutate-run`).
+- **Set aside by exit code, not outcome.** A run the wrapper refuses (exit
+  75) is a harness failure, not a result: it is set aside and re-run once.
+- **Concurrency.** Up to 4 servers' sweeps run at once (2 before). The
+  workers per sweep are unchanged.
