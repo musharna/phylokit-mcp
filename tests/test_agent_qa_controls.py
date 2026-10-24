@@ -789,3 +789,45 @@ def test_spend_gate_stops_the_sweep_before_a_run(tmp_path: Path, monkeypatch) ->
     monkeypatch.delenv("BENCH_SPEND_GATE")  # unset: subscription sweeps unchanged
     monkeypatch.setenv("GATE_RC", "3")
     assert run.gated_run(run.Gate(), "mcp", {"id": "q04"}, 1, run.SERVER) is not None
+
+
+def test_the_as_written_tables_never_overwrite_the_primary_ones(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``analyze.py --as-written`` writes its summary/paired/baselines tables to
+    ``<outdir>/as_written/``; the primary tables in ``<outdir>`` keep the
+    narrowed rule's judgement. The statistics are stubbed to echo each row's
+    ``valid`` flag, so the file content shows which rule produced it."""
+    rows = [
+        {
+            "arm": "mcp",
+            "qid": "q01",
+            "rep": 1,
+            "valid": True,
+            "valid_as_written": False,
+        },
+        {"arm": "alt", "qid": "q01", "rep": 1, "valid": True, "valid_as_written": True},
+    ]
+    results = tmp_path / "results.jsonl"
+    results.write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    def echo(rows, rng, *a):
+        return [
+            {
+                "level": "echo",
+                "valid": "".join("1" if r["valid"] else "0" for r in rows),
+            }
+        ]
+
+    monkeypatch.setattr(analyze, "arm_rows", echo)
+    monkeypatch.setattr(analyze, "paired_rows", lambda rows, rng, *a: [])
+    monkeypatch.setattr(analyze, "baselines", lambda qs: [{"level": "base"}])
+    monkeypatch.setattr(analyze, "baseline_rows", lambda base, rng: [])
+    analyze.main([str(results), str(tmp_path)])
+    primary = (tmp_path / "summary.tsv").read_text()
+    assert "\t11" in primary  # positive control: both rows valid as narrowed
+    analyze.main([str(results), str(tmp_path), "--as-written"])
+    assert (tmp_path / "summary.tsv").read_text() == primary, "primary overwritten"
+    assert "\t01" in (tmp_path / "as_written" / "summary.tsv").read_text()
+    for f in ("paired.tsv", "baselines.tsv"):
+        assert (tmp_path / "as_written" / f).exists()

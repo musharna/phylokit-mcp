@@ -475,7 +475,10 @@ def main(argv: list[str]) -> None:
     rows = [json.loads(ln) for p in paths for ln in p.read_text().splitlines()]
     if written:
         rows = as_written(rows)
-        print("validity: the leak rule AS WRITTEN (secondary)")
+        # The secondary tables go beside the primary ones, never over them.
+        outdir = outdir / "as_written"
+        outdir.mkdir(exist_ok=True)
+        print(f"validity: the leak rule AS WRITTEN (secondary), tables in {outdir}")
     keys = [(r["arm"], r["qid"], r["rep"]) for r in rows]
     if len(set(keys)) != len(keys):
         raise SystemExit(f"a run appears twice across {[str(p) for p in paths]}")
