@@ -63,8 +63,9 @@ their sha256 is in the key.
   length 500-1000, internal edges 0.02-0.1, tips 0.05-0.2, GTR+F+G4 with
   alpha 0.5-1.5. Only the unaligned FASTA is given.
 - Answer `<residue> | <Newick>`. Right iff both parts are right.
-- (a) Tree: right iff its nRF to the generating tree is ≤ mean + 3 sd of the
-  reference's nRF over 20 seeded runs: MAFFT --auto, then IQ-TREE ModelFinder
+- (a) Tree: right iff its nRF to the generating tree is ≤ the reference's mean
+  nRF + max(3 sd, one split), where one split is 2/(2n − 6) in nRF for n taxa.
+  The mean and sd are taken over 20 seeded runs: MAFFT --auto, then IQ-TREE ModelFinder
   + ML at seed 1, then ModelFinder's pick fitted at seeds 2-20. The first
   build ran ModelFinder at all 20 seeds. It was stopped after one batch,
   because that design projected the build past 2 h; no question from it was
@@ -75,12 +76,20 @@ their sha256 is in the key.
   agrees with the true alignment. A draw that fails any of these is
   discarded.
 - Retention: 11 drawn, 10 kept. 1 discarded: MAFFT disagreed on the column.
-- **The tree tolerance is strict.** On every question the 20 reference runs
-  give one nRF (sd 0), so the tolerance is the reference's own nRF.
-  - On 4 questions that is 0: the exact true tree is needed.
-  - On 6 it is one split (nRF 0.026-0.043).
-  - A pipeline one split worse than MAFFT --auto + ModelFinder fails.
-  - This follows the spec's rule, and it is fixed here, before any run.
+- **Tolerance amendment (2026-10-24, coordinator decision, before any arm
+  ran).** The rule was mean + 3 sd. It is now mean + max(3 sd, one split).
+  - Why: the 3 sd term was meant to absorb tree-search noise. On every
+    question the 20 reference runs give the same nRF (sd 0), so 3 sd alone
+    meant "match the reference pipeline exactly". That fails a legitimate
+    alternative alignment, such as MAFFT without --auto, by a single split.
+  - Now the floor binds on all 10. A tree may have one more wrong split than
+    the reference pipeline's.
+  - The reference has 0 wrong splits on 4 questions, 1 on 5 and 2 on 1, so
+    1-3 wrong splits are allowed.
+  - Tolerances run from nRF 0.030 to 0.074.
+  - The no-alignment shortcut (nRF 0.81-1.0) is still wrong on 10 of 10.
+  - `tests/test_agent_qa_field.py::test_p3_admits_one_split_beyond_the_reference_and_not_two`
+    checks this on every question. It was seen to fail on the 3 sd key.
 
 Inputs stay inside the server's caps (≤ 200 taxa, ≤ 100,000 sites). No server
 feature was added. Gaps that may cost the server, noted and not fixed:
@@ -115,6 +124,22 @@ feature was added. Gaps that may cost the server, noted and not fixed:
   - the positive control reading a shortcut's reply;
   - a web tool left in the web-off alt;
   - the key: p1q01's truth set to the JC answer.
+- **After the tolerance amendment**, 8 of 8 more mutants were killed:
+  - the builder:
+    - no floor;
+    - min for max;
+    - one split as 1/(2n−6);
+    - one split as 4/(2n−6);
+  - the scorer:
+    - a strict edge;
+    - no float slack;
+    - the tree ignored;
+  - the key: p3q02's tolerance set back to 0.
+- The controls were re-run on the amended key:
+  - the reference at seed 2 is right on 30 of 30;
+  - no alignment is wrong on 10 of 10;
+  - the same relative position is wrong on 9 of 10;
+  - P1 and P2 are unchanged.
 - **Caught in the build.** The first key rounded each band to 4 decimals.
   That put the P3 edge below the reference's own nRF, and the seed-2
   reference failed 6 of 10. The bands are now rebuilt from integer counts

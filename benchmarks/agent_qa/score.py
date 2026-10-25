@@ -41,7 +41,8 @@ Field families (``field_2026-10-24/``, PREREG_2026-10-24_field-families.md):
   precision 1 and recall 0.
 - ``align_tree_homology``: ``<residue> | <Newick>``. Right iff the residue
   equals the true alignment's, exactly, AND the tree's normalised RF to the
-  generating tree is <= ``nrf_max``. Each part's result is in ``detail``.
+  generating tree is <= ``nrf_max`` (the reference's mean nRF + max(3 sd,
+  one split), 2/(2n-6)). Each part's result is in ``detail``.
 
 A wrong answer that is still a legitimate option (a taxon in the alignment,
 one of the four candidate models) is also flagged ``wrong_id``: a well-formed

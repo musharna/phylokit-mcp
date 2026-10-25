@@ -253,20 +253,52 @@ def test_the_p2_band_is_the_reference_minus_three_binomial_se() -> None:
         assert ml["recall"] >= ref["recall"] and ml["precision"] < p_min, q["id"]
 
 
-def test_the_p3_tolerance_is_mean_plus_three_sd_of_twenty_reference_runs() -> None:
+def test_the_p3_tolerance_is_mean_plus_max_of_three_sd_and_one_split() -> None:
     import statistics
 
     for q in _questions("align_tree_homology"):
         rf = q["check"]["reference_rf"]
         assert len(rf) == 20
         nrf = [k / (2 * (len(q["truth"]["taxa"]) - 3)) for k in rf]
-        tol = statistics.mean(nrf) + 3 * statistics.stdev(nrf)
+        one_split = 2 / (2 * len(q["truth"]["taxa"]) - 6)
+        tol = statistics.mean(nrf) + max(3 * statistics.stdev(nrf), one_split)
         assert q["truth"]["nrf_max"] == pytest.approx(tol, abs=1e-12), q["id"]
+        assert q["check"]["nrf_one_split"] == pytest.approx(one_split, abs=1e-15)
         # The reference's own nRF is inside its tolerance: the band edge was
         # once rounded below it, and the seed-2 reference failed its own key.
         assert max(nrf) <= q["truth"]["nrf_max"] + 1e-9, q["id"]
         assert q["check"]["padded_nrf"] > q["truth"]["nrf_max"], q["id"]
         assert abs(q["check"]["offset"]) >= B.HOMOLOGY_MIN_OFFSET
+
+
+def _tree_at_rf(newick: str, target: int, seed: int) -> str:
+    """A tree whose RF to ``newick`` is exactly ``target``, by seeded NNIs."""
+    import numpy as np
+    from build_questions import nni
+
+    rng = np.random.default_rng(seed)
+    true = T.splits(T.parse_newick(newick))
+    for _ in range(200):
+        adj = T.parse_newick(newick)
+        for _ in range(target // 2):
+            nni(adj, rng)
+        if T.robinson_foulds(T.splits(adj), true) == target:
+            return T.to_newick(adj, rng, lengths=False)
+    raise AssertionError(f"no tree at RF {target}")
+
+
+def test_p3_admits_one_split_beyond_the_reference_and_not_two() -> None:
+    """The floor, scored through the real scorer on every P3 question: a tree
+    one split worse than the reference pipeline's is right, two splits worse
+    is wrong, both with the true residue (so only the tree part decides)."""
+    for q in _questions("align_tree_homology"):
+        (k,) = set(q["check"]["reference_rf"])  # all 20 runs agree
+        pos, truth_tree = q["truth"]["position"], q["truth"]["newick"]
+        one_worse = _tree_at_rf(truth_tree, k + 2, seed=1)
+        two_worse = _tree_at_rf(truth_tree, k + 4, seed=2)
+        assert _v(q, f"{pos} | {one_worse}") == "right", q["id"]
+        assert _v(q, f"{pos} | {two_worse}") == "wrong", q["id"]
+        assert q["check"]["nrf_floor_binds"] is True, q["id"]
 
 
 # --- harness: question set flag, web-off alt, dry run -------------------------------
@@ -415,3 +447,22 @@ def test_the_field_builder_never_imports_the_server_or_its_libraries() -> None:
         }
         assert not banned, path.name
         assert "truth" in mods, path.name  # positive control: the walk sees imports
+
+
+def test_the_builders_tolerance_step_reproduces_the_stored_bands() -> None:
+    """``exact_tolerances`` run again on each stored question, with the bands
+    it writes wiped, gives back the key's bands exactly: the code that made
+    the key is under test, not only its output."""
+    for q in json.loads(json.dumps(_questions())):
+        if q["category"] == "lba_sister":
+            continue
+        want = dict(q["truth"])
+        for k in ("nrf_max", "precision_min", "recall_min"):
+            q["truth"].pop(k, None)
+        q["source"] = q["source"].replace(
+            "mean + max(3 sd, one split) over", "mean + 3 sd over"
+        )
+        B.exact_tolerances(q)
+        for k in ("nrf_max", "precision_min", "recall_min"):
+            if k in want:
+                assert q["truth"][k] == want[k], (q["id"], k)

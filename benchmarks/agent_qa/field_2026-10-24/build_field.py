@@ -16,8 +16,8 @@ Three families, 10 questions each (PREREG_2026-10-24_field-families.md):
   IQ-TREE ModelFinder + UFBoot2 (1000 replicates), clades with support >= 95.
 - ``align_tree_homology`` (P3): AliSim ``--indel 0.05,0.1`` on 20-50 taxa;
   the agent gets only the unaligned FASTA. (a) the tree, scored by normalised
-  RF to the generating tree, passing if <= mean + 3 sd of the reference's
-  nRF over 20 seeded runs (MAFFT --auto + ModelFinder + ML); (b) the residue
+  RF to the generating tree, passing if <= the reference's mean nRF over 20
+  seeded runs (MAFFT --auto + ModelFinder + ML) + max(3 sd, one split); (b) the residue
   of taxon B in the same column as residue i of taxon A, scored exactly
   against AliSim's true alignment (the existing homology rule: no gap in
   either row within 6 columns, the two positions differ by >= 5, and MAFFT
@@ -92,7 +92,9 @@ UNALIGNED = "sequences.fasta"
 UFBOOT_THRESHOLD = 95.0
 UFBOOT_REPLICATES = 1000
 # P3: the reference pipeline is re-run with this many seeds; the tree
-# tolerance is mean + 3 sd of their nRF to the generating tree.
+# tolerance is their mean nRF to the generating tree + max(3 sd, one split),
+# one split being 2 / (2n - 6) in nRF (coordinator decision, 2026-10-24: with
+# sd = 0 on every question, 3 sd alone meant "match MAFFT --auto exactly").
 P3_REF_SEEDS = 20
 # P3 homology rule (as in build_questions.py): no gap within this many
 # columns of the asked one in either row; the two positions differ by >= 5.
@@ -853,14 +855,31 @@ def exact_tolerances(q: dict[str, Any]) -> None:
     runs share one nRF, k / 2(n-3), the band's edge rounded below k / 2(n-3),
     and the reference pipeline at seed 2 failed its own key (the positive
     control caught it on 6 of 10). Every stored value is k / m for a known m
-    (``_count``); the bands are rebuilt from the k's, unrounded."""
+    (``_count``); the bands are rebuilt from the k's, unrounded.
+
+    P3's tree tolerance is mean + max(3 sd, one split), one split = 2 / (2n-6)
+    in nRF. The 3 sd term was meant to absorb tree-search noise; with sd = 0
+    on all 10 questions it alone meant "match the reference pipeline
+    exactly", failing a legitimate alternative alignment (MAFFT without
+    --auto, say) by a single split. The floor is applied here, not in
+    ``p3_draw``, whose source fingerprints the cached draws."""
     t, c = q["truth"], q["check"]
     if q["category"] == "align_tree_homology":
         denom = 2 * (len(t["taxa"]) - 3)
         rf = [_count(x, denom) for x in c["reference_nrf"]]
         exact = [k / denom for k in rf]
         c["reference_rf"] = rf
-        t["nrf_max"] = float(np.mean(exact) + 3 * np.std(exact, ddof=1))
+        one_split = 2 / denom
+        three_sd = 3 * float(np.std(exact, ddof=1))
+        t["nrf_max"] = float(np.mean(exact)) + max(three_sd, one_split)
+        c["nrf_one_split"] = one_split
+        c["nrf_floor_binds"] = three_sd < one_split
+        old = "tolerance = mean + 3 sd over"
+        if q["source"].count(old) != 1:
+            raise SystemExit(f"{q['id']}: source does not name the old tolerance once")
+        q["source"] = q["source"].replace(
+            old, "tolerance = mean + max(3 sd, one split) over"
+        )
     elif q["category"] == "supported_clades":
         ref, n_true = c["reference"], t["n_true_splits"]
         hits = _count(ref["recall"], n_true)
