@@ -87,6 +87,7 @@ from .splits import (
     format_split,
     normalised_robinson_foulds,
     robinson_foulds,
+    splits_to_newick,
 )
 
 INSTRUCTIONS = f"""\
@@ -115,6 +116,11 @@ Read the output in this order:
    reported tree does NOT contain. A Newick string cannot express these, so they
    are the finding most often missed.
 3. Individual clade support before repeating any specific grouping as a fact.
+
+To report only the supported clades, use `newick_supported`: the ML tree with
+every clade below the method's line collapsed into a polytomy. For the full ML
+topology without branch lengths, use `newick_topology`. Copy either as is; do
+not rebuild a tree by hand.
 
 `select_substitution_model` returns the ranking and the margin, not just a
 winner. Models within {DELTA_INDISTINGUISHABLE} of the best are conventionally
@@ -179,6 +185,11 @@ class AlignmentDict(TypedDict):
 class TreeResult(TypedDict):
     newick: str
     newick_with_support: str
+    # Topology only: the ML tree with every clade below `support`'s own
+    # "supported" line collapsed, which is what a caller reports.
+    newick_supported: str
+    # The ML tree with no branch lengths, for an answer that wants topology.
+    newick_topology: str
     model: str
     log_likelihood: float | None
     alignment: AlignmentDict
@@ -377,9 +388,14 @@ def infer_tree(
         )
     by_clade = {c.as_dict()["clade"]: c.support for c in support.clades}
     newick = tree.get_newick(with_distances=True)
+    supported = {
+        frozenset(c.taxa) for c in support.clades if c.support >= support.supported_at
+    }
     return TreeResult(
         newick=newick,
         newick_with_support=_annotate(tree, by_clade, set(seqs)),
+        newick_supported=splits_to_newick(set(seqs), supported),
+        newick_topology=tree.get_newick(with_distances=False),
         model=model,
         log_likelihood=tree_log_likelihood(tree),
         alignment=stats.__dict__,  # type: ignore[typeddict-item]
@@ -789,8 +805,14 @@ def _with_heartbeat(call, ctx: Context | None, name: str):
     `report_progress` is a no-op when the client sent no progress token, so a
     client that did not ask gets nothing extra. The value is elapsed seconds,
     which only increases, as the protocol requires.
+
+    A Context with no request behind it (`mcp.call_tool` in-process) has no
+    client to notify, so it gets no heartbeat: `report_progress` raises there.
+    A heartbeat that fails while sending fails the call, but only after the
+    work has finished and released the lock. Raising at once left the engine
+    call running on its helper thread, and the next call raced it.
     """
-    if ctx is None or HEARTBEAT_S <= 0:
+    if ctx is None or HEARTBEAT_S <= 0 or not _has_request(ctx):
         return call()
     box: dict[str, Any] = {}
 
@@ -808,12 +830,32 @@ def _with_heartbeat(call, ctx: Context | None, name: str):
         if not worker.is_alive():
             break
         elapsed = round(time.monotonic() - start, 1)
-        anyio.from_thread.run(
-            ctx.report_progress, elapsed, None, f"{name} still running, {elapsed:.0f} s"
-        )
+        try:
+            anyio.from_thread.run(
+                ctx.report_progress,
+                elapsed,
+                None,
+                f"{name} still running, {elapsed:.0f} s",
+            )
+        except Exception as exc:
+            worker.join()
+            raise RuntimeError(
+                f"{name}: progress notification failed after {elapsed:.0f} s "
+                f"({type(exc).__name__}: {exc}); the call ran to completion "
+                "but its result was not returned."
+            ) from exc
     if "error" in box:
         raise box["error"]
     return box["value"]
+
+
+def _has_request(ctx: Context) -> bool:
+    """Whether `ctx` belongs to a client request (the SDK raises if not)."""
+    try:
+        _ = ctx.request_context
+    except ValueError:
+        return False
+    return True
 
 
 def _surfaces_refusals(fn):

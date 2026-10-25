@@ -20,8 +20,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `align_sequences(out_path=...)` writes the alignment to a new file (never
   overwritten) and returns its path in `written_to`, with `fasta` None, for
   clients that cannot write files. The tool is no longer marked read-only.
+- `infer_tree` returns `newick_supported`, the ML tree with every clade below
+  the method's own line collapsed, and `newick_topology`, the ML tree without
+  branch lengths. On the field benchmark every miss of the revised server (10
+  of 20) was a tree the agent re-typed from the output and broke.
 
 ### Fixed
+
+- An in-process call (`mcp.call_tool`) has a Context with no request; the
+  heartbeat raised on it after 15 s and left the engine call running on its
+  helper thread, which broke the next calls' file descriptors. Such calls now
+  get no heartbeat, and a heartbeat that fails to send fails the call only
+  after the work has finished.
 
 - The bootstrap module said piqtree 0.8.3 does not expose UFBoot support. It
   does, as `.support` on each internal node.

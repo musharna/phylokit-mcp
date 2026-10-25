@@ -70,3 +70,40 @@ def normalised_robinson_foulds(
     if denom == 0:
         return None
     return robinson_foulds(splits_a, splits_b) / denom
+
+
+def splits_to_newick(tip_names: Iterable[str], splits: set[Split]) -> str:
+    """An unrooted Newick tree holding exactly ``splits``, polytomies elsewhere.
+
+    ``splits`` are canonical (the side without the reference taxon, as
+    `canonical_splits` returns them), so every one is a set of non-reference
+    tips and a compatible family of them is a laminar family: any two are
+    nested or disjoint. Each split becomes a node under the smallest split that
+    contains it; the reference taxon and every uncovered tip hang from the root.
+    Topology only: no branch lengths, which a collapsed edge would not have.
+    """
+    tips = frozenset(tip_names)
+    ordered = sorted(splits, key=lambda s: (-len(s), format_split(s)))
+    for i, a in enumerate(ordered):
+        for b in ordered[i + 1 :]:
+            if not (b <= a or not (a & b)):
+                raise ValueError(
+                    f"splits {format_split(a)} and {format_split(b)} are not "
+                    "compatible: no single tree contains both."
+                )
+    children: dict[Split, list[Split]] = {tips: []}
+    for s in ordered:
+        parent = min(
+            (p for p in children if s < p), key=lambda p: (len(p), format_split(p))
+        )
+        children[parent].append(s)
+        children[s] = []
+
+    def render(node: Split) -> str:
+        kids = children[node]
+        covered = frozenset().union(*kids) if kids else frozenset()
+        parts = [render(k) for k in sorted(kids, key=format_split)]
+        parts += sorted(node - covered)
+        return "(" + ",".join(parts) + ")"
+
+    return render(tips) + ";"

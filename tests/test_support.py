@@ -25,9 +25,13 @@ from phylokit_mcp.bootstrap import (
     validate_replicates,
 )
 from phylokit_mcp.engine import IN_PROCESS_DRIFT
+from phylokit_mcp.newick import parse_newick
 from phylokit_mcp.server import compare_trees, infer_tree
+from phylokit_mcp.splits import canonical_splits, format_split, splits_to_newick
 
 from .conftest import TRUE_CLADES
+
+TIPS = set("ABCDEFG")
 
 
 def test_a_long_alignment_recovers_the_true_tree(fasta_easy, easy_alignment):
@@ -384,4 +388,63 @@ def test_ufboot_replicates_follow_iqtrees_floor_and_the_default_follows_the_meth
     assert default["support"]["replicates"] == 100
     assert (
         default["support"]["method"] == "nonparametric bootstrap over alignment columns"
+    )
+
+
+@pytest.mark.parametrize("method", ["bootstrap", "ufboot"])
+def test_newick_supported_holds_exactly_the_clades_at_the_methods_line(
+    fasta_hard, method
+):
+    """The tree a caller reports: every clade below the line collapsed.
+
+    The poorly-resolved advisory already says collapsing unsupported nodes is
+    the honest representation, but the server never returned that tree. On the
+    field benchmark the agent rebuilt it by hand from ~86 clades and dropped a
+    parenthesis on 3 of its first 4 answers (2026-10-25).
+    """
+    result = infer_tree(fasta=fasta_hard, model="JC", support_method=method, seed=1)
+    line = result["support"]["support_thresholds"]["supported"]
+    want = {c["clade"] for c in result["support"]["clades"] if c["support"] >= line}
+    got = {
+        format_split(s)
+        for s in canonical_splits(parse_newick(result["newick_supported"]), TIPS)
+    }
+    assert got == want
+    # Not vacuous: the hard case has a clade below the line, so the collapsed
+    # tree is strictly smaller than the ML tree; every tip is still there.
+    assert len(want) < len(result["support"]["clades"])
+    assert set(parse_newick(result["newick_supported"]).get_tip_names()) == TIPS
+
+
+def test_newick_supported_is_the_full_ml_topology_when_every_clade_clears(fasta_easy):
+    """Positive control: nothing is collapsed when nothing falls below the line."""
+    result = infer_tree(fasta=fasta_easy, model="JC", support_method="ufboot", seed=1)
+    got = {
+        format_split(s)
+        for s in canonical_splits(parse_newick(result["newick_supported"]), TIPS)
+    }
+    assert got == TRUE_CLADES
+
+
+def test_splits_to_newick_builds_polytomies_and_refuses_incompatible_splits():
+    tips = {"a", "b", "c", "d", "e", "f"}
+    star = splits_to_newick(tips, set())
+    assert canonical_splits(parse_newick(star), tips) == set()
+    two = {frozenset({"b", "c"}), frozenset({"d", "e", "f"})}
+    assert canonical_splits(parse_newick(splits_to_newick(tips, two)), tips) == two
+    with pytest.raises(ValueError, match="not compatible"):
+        splits_to_newick(tips, {frozenset({"b", "c"}), frozenset({"c", "d"})})
+
+
+def test_newick_topology_is_the_ml_tree_without_branch_lengths(fasta_hard):
+    """The ML tree as a caller writes it in an answer: same splits, no lengths.
+
+    On the field benchmark the agent stripped the lengths from `newick` by hand
+    and dropped a parenthesis on 2 of its first 5 P3 answers (2026-10-25).
+    """
+    result = infer_tree(fasta=fasta_hard, model="JC", replicates=20, seed=1)
+    topo = result["newick_topology"]
+    assert ":" not in topo
+    assert canonical_splits(parse_newick(topo), TIPS) == canonical_splits(
+        parse_newick(result["newick"]), TIPS
     )
