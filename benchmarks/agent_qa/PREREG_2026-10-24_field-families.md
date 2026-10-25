@@ -219,3 +219,60 @@ same builder: new seeds, the same discard rules, built before any arm runs.
   dir, so `versions.json` pins one server).
 - **Budget:** what is left of the pilot's $40, through the same `LAUNCH_STOP` gate
   (160.23). The run is estimated at about $9.
+
+## Amendment, 2026-10-25: confirmatory P2 and P3 run on held-out draws
+
+The exploratory re-run above scored the revised server on the questions it was
+revised against. The user decided (2026-10-25, "go ahead with 1-3") to test it
+on fresh draws. This section is committed before those draws are built, so
+neither the questions nor any model reply on them has been seen.
+
+- **Questions:** 10 P2 and 10 P3 from `build_field.py --families
+  supported_clades,align_tree_homology --first-draw 2000`. The builder, settings,
+  seed and discard rules are the pilot's. The only change is the first draw
+  index: draws 2000+, which no earlier set examined (the pilot's P2 and P3 kept
+  draws 0-13 and 0-10; the P1 calibration used 1000+). The key goes to
+  `field_2026-10-25_confirm/questions.json`; its data goes to
+  `~/phylokit-mcp-artifacts/agent_qa/field-families-2026-10-25-confirm/`.
+  If either family runs out of draws (400 without 10 kept), the run is off and
+  that is reported.
+- **Controls before any arm runs** (`tests/test_agent_qa_field_confirm.py`):
+  - oracle right and a wrong answer wrong on all 20;
+  - the reference pipeline at seed 2 right on all 20;
+  - the discard-rule shortcuts wrong on all of theirs: P2 with every clade
+    reported, and P3 with no alignment;
+  - each truth recomputed from its generator, and the bookkeeping adds up;
+  - no kept draw index overlaps the pilot's.
+  The pilot's other shortcut counts (no +G, same relative position) are reported,
+  not asserted. A failed control stops the run.
+- **Arms:** `alt` (Bash + Read, web off, as in the pilot) and `mcp` (Read + the
+  server). Both use model `claude-sonnet-5-5`, 1 rep, 2 workers and the 1800 s
+  run cap, in one `run.py` invocation.
+- **Server:** `git+https://github.com/musharna/phylokit-mcp@dfcaed8affbdbc767bdfb0b7c283ba550be953c8`,
+  the head of draft PR #80. It is dfd248c plus `newick_supported` and
+  `newick_topology`, the request-less heartbeat fix, and the root-bifurcation
+  fix. It is not released.
+- **Primary result:** per question, mcp right vs alt right. Discordant pairs are
+  pooled over P2 and P3 (20 questions). Exact two-sided sign test
+  (`analyze.sign_test`):
+  - **WIN:** mcp-only > alt-only and p < 0.05;
+  - **LOSS:** alt-only > mcp-only and p < 0.05;
+  - **TIE:** otherwise.
+  Wrong, timeout, declined, no answer and invalid all count as not right, as
+  in the headroom rule. With 20 questions, a WIN needs at least 6 discordant
+  pairs, all for mcp (6:0, p = 0.031), or 8:1 (p = 0.039). A tie is reported as one.
+- **Reported beside it, not deciding:**
+  - per-family counts;
+  - each run's `support_method`, and whether a P3 answer copied `newick_*`
+    exactly;
+  - the re-score of the server's own `infer_tree` output, labelled
+    counterfactual.
+- **Known limit, stated now:** the P2 key is UFBoot2 1000 replicates at 0.95.
+  That is the server's `support_method="ufboot"` method, so on P2 a server that
+  chooses it scores partly by construction. The alt arm has the same piqtree
+  library and can compute UFBoot2 itself; the alt note is unchanged. P3 has no
+  such overlap: its key is MAFFT + ModelFinder + ML via the IQ-TREE CLI.
+- **Results:** `field_2026-10-25_confirm/results.jsonl`.
+- **Budget:** what is left of the pilot's $40, through the same `LAUNCH_STOP`
+  gate (160.23). The estimate is about $2.50 (pilot alt P2+P3 $0.64; exploratory
+  mcp $1.87).

@@ -368,17 +368,19 @@ def run_draws(
     use_cache: bool = True,
     n_keep: int = N_PER_FAMILY,
     max_draws: int = 400,
+    first: int = 0,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Evaluate draws 0, 1, 2, ... (each from its own seed, so in parallel or
-    not, the same draws are kept) and keep the first ``n_keep`` that pass, in
-    draw order. Returns the kept questions and the bookkeeping."""
+    """Evaluate draws first, first + 1, ... (each from its own seed, so in
+    parallel or not, the same draws are kept) and keep the first ``n_keep``
+    that pass, in draw order. Returns the kept questions and the bookkeeping.
+    A held-out set starts at a ``first`` no earlier set reached."""
     kept: list[dict[str, Any]] = []
     reasons: dict[str, int] = {}
     examined = 0
-    i = 0
+    i = first
     with ProcessPoolExecutor(max_workers=workers) as pool:
         while len(kept) < n_keep:
-            if i >= max_draws:
+            if i - first >= max_draws:
                 raise SystemExit(f"{family}: {max_draws} draws, only {len(kept)} kept")
             batch = list(range(i, i + workers))
             i += workers
@@ -915,6 +917,9 @@ def main() -> None:
     ap.add_argument("--families", default=",".join(FAMILIES))
     ap.add_argument("--out", default=str(HERE / "questions.json"))
     ap.add_argument("--no-cache", action="store_true", help="recompute every draw")
+    ap.add_argument(
+        "--first-draw", type=int, default=0, help="first draw index (held-out sets)"
+    )
     a = ap.parse_args()
     if not 1 <= a.workers <= 4:
         raise SystemExit("--workers must be 1-4 (shared machine)")
@@ -932,7 +937,10 @@ def main() -> None:
     for family in a.families.split(","):
         short = FAMILIES[family][0]
         t0 = time.monotonic()
-        kept, book = run_draws(family, cached_draw, a.workers, not a.no_cache)
+        kept, book = run_draws(
+            family, cached_draw, a.workers, not a.no_cache, first=a.first_draw
+        )
+        book["first_draw"] = a.first_draw
         timing[family] = round(time.monotonic() - t0, 1)
         for k, q in enumerate(kept, 1):
             q["id"] = f"{short}q{k:02d}"
