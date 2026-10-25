@@ -42,6 +42,13 @@ mark every run invalid.
     uv run python benchmarks/agent_qa/run.py --setup-alt     # once: builds .alt-env
     uv run python benchmarks/agent_qa/run.py --reps 3 --workers 2
 
+``--questions`` picks the question set (default ``questions.json``; the
+2026-10-24 field families are ``field_2026-10-24/questions.json``), and results
+go beside it unless ``--results`` says otherwise. A key with ``"alt_web":
+false`` (the field families) runs the alt arm with Bash and Read only, and
+the validity rule then requires exactly those tools. ``--dry-run`` runs no
+model: it prints each arm's tools and flags and every rendered prompt.
+
 ``--server-spec git+https://github.com/musharna/phylokit-mcp@<40-hex sha>``
 runs the mcp arm on an unreleased commit instead of the PyPI pin, and
 ``--server-spec phylokit-mcp==<x.y.z>`` on another release. The spec is
@@ -131,6 +138,31 @@ INTENDED = {
     "mcp": {"Read"},
     "read": {"Read"},
 }
+# The alt arm without the web (a question set whose key says ``"alt_web":
+# false``; the 2026-10-24 field families): a shell and Read, nothing else.
+ALT_NO_WEB = ("Bash", "Read")
+DEFAULT_QUESTIONS = HERE / "questions.json"
+
+
+def alt_tools(web: bool = True) -> tuple[str, ...]:
+    """The alt arm's tools: with the web (the default sets) or without it."""
+    return ("Bash", "Read", "WebSearch", "WebFetch") if web else ALT_NO_WEB
+
+
+def intended(arm: str, web: bool = True) -> set[str]:
+    """The tools ``arm``'s init event must list, exactly."""
+    return set(alt_tools(web)) if arm == "alt" else INTENDED[arm]
+
+
+def load_key(path: Path) -> dict[str, Any]:
+    """A question set and its key; ``alt_web`` (default true) says whether the
+    alt arm has the web."""
+    key = json.loads(Path(path).read_text())
+    if not isinstance(key.get("alt_web", True), bool):
+        raise SystemExit(f"{path}: alt_web must be true or false")
+    return key
+
+
 # A tool input or output matching any of these touched what a run must not:
 # the key and the benchmark's code (by file or directory name), its
 # transcripts and artifacts, the coordinator's job files, or the benchmark's
@@ -139,6 +171,7 @@ INTENDED = {
 LEAK_PATTERNS = (
     r"questions\.json",
     r"build_questions",
+    r"build_field",
     r"\btruth\.py",
     r"\bcontrols\.py",
     r"results\.jsonl",
@@ -181,7 +214,7 @@ def mafft_bin() -> Path:
     return BIN
 
 
-def setup_alt() -> None:
+def setup_alt(questions: Path = DEFAULT_QUESTIONS) -> None:
     """Build ALT_ENV from uv.lock: every locked dependency, not the project."""
     uv = shutil.which("uv")
     if uv is None:
@@ -206,7 +239,7 @@ def setup_alt() -> None:
         ],
         check=True,
     )
-    check_alt(json.loads((HERE / "questions.json").read_text())["checked_with"])
+    check_alt(load_key(questions)["checked_with"])
 
 
 _VERSIONS = (
@@ -318,9 +351,10 @@ def check_mafft(checked: dict[str, str]) -> None:
 
 
 def arm_setup(
-    arm: str, tmp: Path, spec: str = SERVER
+    arm: str, tmp: Path, spec: str = SERVER, web: bool = True
 ) -> tuple[list[str], dict[str, str]]:
-    """The claude flags and the environment for one arm."""
+    """The claude flags and the environment for one arm; ``web=False`` takes
+    WebSearch and WebFetch away from the alt arm."""
     empty = tmp.parent / f"{tmp.name}-no-mcp.json"
     empty.write_text('{"mcpServers": {}}')
     env = dict(os.environ)
@@ -334,7 +368,7 @@ def arm_setup(
     if arm == "alt":
         env.pop("VIRTUAL_ENV", None)
         env["PATH"] = f"{ALT_ENV / 'bin'}:{mafft_bin()}:{SYSTEM_PATH}"
-        tools = "Bash,Read,WebSearch,WebFetch"
+        tools = ",".join(alt_tools(web))
         return [
             "--tools", tools, "--allowedTools", tools,
             "--strict-mcp-config", "--mcp-config", str(empty),
@@ -432,8 +466,11 @@ def leak_hits(
     return sorted(set(hits))
 
 
-def validity(arm: str, events: list[dict[str, Any]], rc: object) -> dict[str, Any]:
-    """One rule for every arm; see the module docstring."""
+def validity(
+    arm: str, events: list[dict[str, Any]], rc: object, web: bool = True
+) -> dict[str, Any]:
+    """One rule for every arm; see the module docstring. ``web`` is the alt
+    arm's web setting (``intended``)."""
     init = next(
         (e for e in events if e.get("type") == "system" and e.get("subtype") == "init"),
         {},
@@ -448,8 +485,8 @@ def validity(arm: str, events: list[dict[str, Any]], rc: object) -> dict[str, An
         reasons.append(f"result {result.get('subtype')}")
     tools = set(init.get("tools") or [])
     plain = {t for t in tools if not t.startswith("mcp__")}
-    if plain != INTENDED[arm]:
-        reasons.append(f"tools {sorted(plain)} != {sorted(INTENDED[arm])}")
+    if plain != intended(arm, web):
+        reasons.append(f"tools {sorted(plain)} != {sorted(intended(arm, web))}")
     servers = {s.get("name"): s.get("status") for s in init.get("mcp_servers") or []}
     if arm == "mcp":
         if not any(t.startswith("mcp__phylokit__") for t in tools):
@@ -507,13 +544,18 @@ def transcript(arm: str, qid: str, rep: int) -> Path:
     return RUNS / arm / f"{qid}-{rep}.jsonl"
 
 
+def render_prompt(arm: str, q: dict[str, Any]) -> str:
+    """The exact prompt ``arm`` is sent for ``q``."""
+    question = q["question"] + (ALT_NOTE if arm == "alt" else "")
+    return PROMPT.format(question=question, answer_format=q["answer_format"])
+
+
 def run_one(
-    arm: str, q: dict[str, Any], rep: int, spec: str = SERVER
+    arm: str, q: dict[str, Any], rep: int, spec: str = SERVER, web: bool = True
 ) -> dict[str, Any]:
     out = transcript(arm, q["id"], rep)
     out.parent.mkdir(parents=True, exist_ok=True)
-    question = q["question"] + (ALT_NOTE if arm == "alt" else "")
-    prompt = PROMPT.format(question=question, answer_format=q["answer_format"])
+    prompt = render_prompt(arm, q)
     claude = shutil.which("claude")
     if claude is None:
         raise SystemExit("claude not found on PATH")
@@ -523,7 +565,7 @@ def run_one(
         tmp.mkdir()
         for name, text in q.get("files", {}).items():
             (tmp / name).write_text(text)
-        flags, env = arm_setup(arm, tmp, spec)
+        flags, env = arm_setup(arm, tmp, spec, web)
         cmd = [
             claude, "-p", prompt, "--model", MODEL, "--setting-sources", "",
             "--output-format", "stream-json", "--verbose", "--system-prompt", SYSTEM,
@@ -593,7 +635,7 @@ def run_one(
         "cwd": _home_as_tilde(init.get("cwd")),
         "reply": reply,
         **score(q, reply),
-        **validity(arm, events, rc),
+        **validity(arm, events, rc, web),
     }
 
 
@@ -789,7 +831,7 @@ class Gate:
 
 
 def gated_run(
-    gate: Gate, arm: str, q: dict[str, Any], rep: int, spec: str
+    gate: Gate, arm: str, q: dict[str, Any], rep: int, spec: str, web: bool = True
 ) -> dict[str, Any] | None:
     """``run_one`` once the gate allows it; None (not run) once it has stopped."""
     if not gate.wait():
@@ -798,7 +840,7 @@ def gated_run(
         return None
     if not gate.spend_ok():
         return None
-    r = run_one(arm, q, rep, spec)
+    r = run_one(arm, q, rep, spec, web)
     path = transcript(arm, q["id"], rep)
     events = [
         json.loads(ln) for ln in path.read_text().splitlines() if ln.startswith("{")
@@ -859,7 +901,7 @@ def drop_api_failures(results: Path) -> None:
         print(f"{arm}: {len(mine)} rows moved to {side.name} {reasons}")
 
 
-def rescore(results: Path, by_id: dict[str, dict[str, Any]]) -> None:
+def rescore(results: Path, by_id: dict[str, dict[str, Any]], web: bool = True) -> None:
     """Score each stored reply again, and re-judge its validity from its
     transcript, so a truth, scorer or validity fix reaches runs made before it;
     prints every verdict or validity that changed. A missing transcript is an
@@ -877,7 +919,7 @@ def rescore(results: Path, by_id: dict[str, dict[str, Any]]) -> None:
         ]
         init = next((e for e in events if e.get("subtype") == "init"), {})
         new["cwd"] = _home_as_tilde(init.get("cwd"))
-        new.update(validity(r["arm"], events, r["exit"]))
+        new.update(validity(r["arm"], events, r["exit"], web))
         if new["verdict"] != r["verdict"] or new["wrong_id"] != r["wrong_id"]:
             print(f"{r['arm']:4} {r['qid']} rep{r['rep']} {r['verdict']} -> {new['verdict']}"
                   f" ({new['value']!r})")  # fmt: skip
@@ -894,13 +936,53 @@ def rescore(results: Path, by_id: dict[str, dict[str, Any]]) -> None:
         )
 
 
+def dry_run(
+    arms: list[str], questions: list[dict[str, Any]], a: argparse.Namespace, web: bool
+) -> None:
+    """What a sweep would send, with no model call: each arm's tools, its claude
+    flags, and every rendered prompt with the files its directory would hold."""
+    if a.only:
+        keep = set(a.only.split(","))
+        questions = [q for q in questions if q["id"] in keep]
+    print(f"model {MODEL}; {len(questions)} questions; reps {a.reps}; "
+          f"results -> {a.results}")  # fmt: skip
+    for arm in arms:
+        with tempfile.TemporaryDirectory(prefix=f"phyloqa-{arm}-") as d:
+            tmp = Path(d) / "cwd"
+            tmp.mkdir()
+            flags, _ = arm_setup(arm, tmp, a.server_spec, web)
+        print(f"== arm {arm}: tools must be exactly {sorted(intended(arm, web))}")
+        print("   claude flags:", " ".join(f for f in flags if "/" not in f))
+    for q in questions:
+        for arm in arms:
+            print(f"\n--- {arm} {q['id']} ({q['category']}) files "
+                  f"{ {k: len(v) for k, v in q.get('files', {}).items()} }")  # fmt: skip
+            print(render_prompt(arm, q))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--arms", default="bare,alt,mcp")
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--only", default="", help="comma-separated question ids")
-    ap.add_argument("--results", default=str(HERE / "results.jsonl"))
+    ap.add_argument(
+        "--questions",
+        default=str(DEFAULT_QUESTIONS),
+        help="the question set and key (default questions.json; the 2026-10-24 "
+        "field families: field_2026-10-24/questions.json)",
+    )
+    ap.add_argument(
+        "--results",
+        default="",
+        help="results file (default: results.jsonl beside --questions)",
+    )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="run nothing: print each arm's tools and flags and every rendered "
+        "prompt, after the oracle check",
+    )
     ap.add_argument(
         "--server-spec",
         default=SERVER,
@@ -939,10 +1021,14 @@ def main() -> None:
     set_model(a.model)
     global DNS_HOST
     DNS_HOST = a.dns_precheck or None
+    qpath = Path(a.questions)
+    if not a.results:
+        a.results = str(qpath.with_name("results.jsonl"))
     if a.setup_alt:
-        setup_alt()
+        setup_alt(qpath)
         return
-    key = json.loads((HERE / "questions.json").read_text())
+    key = load_key(qpath)
+    web = key.get("alt_web", True)
     questions = key["questions"]
     # Positive control before anything is spent: the key's answers score
     # right and known-wrong ones score wrong.
@@ -953,12 +1039,15 @@ def main() -> None:
         drop_api_failures(Path(a.results))
         return
     if a.rescore:
-        rescore(Path(a.results), {q["id"]: q for q in questions})
+        rescore(Path(a.results), {q["id"]: q for q in questions}, web)
         return
     arms = a.arms.split(",")
     unknown = set(arms) - set(ARMS)
     if unknown:
         raise SystemExit(f"unknown arms {sorted(unknown)}; known: {ARMS}")
+    if a.dry_run:
+        dry_run(arms, questions, a, web)
+        return
     check_server_spec(a.server_spec)
     versions: dict[str, Any] = {"arms": arms, "model": MODEL}
     if "alt" in arms:
@@ -1015,7 +1104,7 @@ def main() -> None:
     lock = threading.Lock()
     gate = Gate()
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
-        futures = [pool.submit(gated_run, gate, *t, a.server_spec) for t in todo]
+        futures = [pool.submit(gated_run, gate, *t, a.server_spec, web) for t in todo]
         for n, f in enumerate(as_completed(futures), 1):
             r = f.result()
             if r is None:

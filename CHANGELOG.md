@@ -6,6 +6,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Field families for the agent benchmark** (`benchmarks/agent_qa/field_2026-10-24/`,
+  `PREREG_2026-10-24_field-families.md`). Three families of 10 questions each:
+  - long-branch attraction (P1);
+  - clades reportable at 95%, scored by precision and recall against the true
+    tree (P2);
+  - unaligned indel-rich DNA to a tree and a homology map (P3).
+
+  The truth comes from AliSim, and no question names a model. `run.py`
+  gains `--questions` and `--dry-run`. The alt arm runs without web tools
+  when the key says `alt_web: false`.
+
 ## [0.7.0] — 2026-10-19
 
 ### Added

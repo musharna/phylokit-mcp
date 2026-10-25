@@ -454,7 +454,7 @@ def test_the_gate_holds_later_runs_and_stops_on_another_model(
 ) -> None:
     calls: list[str] = []
 
-    def fake_run_one(arm: str, q: dict, rep: int, spec: str) -> dict:
+    def fake_run_one(arm: str, q: dict, rep: int, spec: str, web: bool = True) -> dict:
         calls.append(q["id"])
         path = run.transcript(arm, q["id"], rep)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -700,7 +700,7 @@ def test_every_row_records_the_load_average_at_its_start_and_end(
     monkeypatch.setattr(run, "RUNS", tmp_path)
     monkeypatch.setattr(run.os, "getloadavg", lambda: next(loads))
     monkeypatch.setattr(run.shutil, "which", lambda name: "/usr/bin/" + name)
-    monkeypatch.setattr(run, "arm_setup", lambda arm, tmp, spec: ([], {}))
+    monkeypatch.setattr(run, "arm_setup", lambda arm, tmp, spec, web=True: ([], {}))
     monkeypatch.setattr(run.subprocess, "run", fake_run)
     r = run.run_one("bare", q, 1)
     assert (r["load1_start"], r["load1_end"], r["exit"]) == (7.5, 9.25, 0)
@@ -717,7 +717,7 @@ def test_a_failed_dns_precheck_stops_the_sweep_before_the_run_starts(
     run starts."""
     calls: list[str] = []
 
-    def fake_run_one(arm: str, q: dict, rep: int, spec: str) -> dict:
+    def fake_run_one(arm: str, q: dict, rep: int, spec: str, web: bool = True) -> dict:
         calls.append(q["id"])
         path = run.transcript(arm, q["id"], rep)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -760,7 +760,7 @@ def test_spend_gate_stops_the_sweep_before_a_run(tmp_path: Path, monkeypatch) ->
     no later run starts. Unset, nothing changes."""
     calls: list[str] = []
 
-    def fake_run_one(arm: str, q: dict, rep: int, spec: str) -> dict:
+    def fake_run_one(arm: str, q: dict, rep: int, spec: str, web: bool = True) -> dict:
         calls.append(q["id"])
         path = run.transcript(arm, q["id"], rep)
         path.parent.mkdir(parents=True, exist_ok=True)
