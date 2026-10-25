@@ -28,6 +28,7 @@
    "bootstrap.py:bootstrap_support.<locals>.<lambda>": 4,
    "bootstrap.py:resample_columns": 20,
    "bootstrap.py:validate_replicates": 2,
+   "bootstrap.py:validate_support_method": 2,
    "diagnostics.py:collect": 1,
    "diagnostics.py:conflicting_support": 1,
    "diagnostics.py:duplicate_sequences": 1,

@@ -9,9 +9,18 @@ MCPServer runs a sync tool in a worker thread (`anyio.to_thread`), so calls a
 client sends together run concurrently unless something stops them, and
 piqtree's engine wrapper changes process-global state for the length of a call:
 it chdirs into a temporary directory it then deletes, and points file
-descriptors 1 and 2 (stdout is the JSON-RPC stream) at /dev/null. Interleaved,
-two calls left the process in a deleted directory and every later call failed
-(the 2026-10-18 benchmark re-run, three `infer_tree` calls in one turn).
+descriptors 1 and 2 at /dev/null. Interleaved, two calls left the process in a
+deleted directory and every later call failed (the 2026-10-18 benchmark re-run,
+three `infer_tree` calls in one turn). The fd swap does not reach the JSON-RPC
+stream: mcp's stdio transport serves it from a private duplicate of fd 1 and
+points fd 1 itself at stderr, so a progress notification sent during an engine
+call still arrives (`tests/test_mcp_protocol.py` checks it on a real process).
+
+Every tool sends `notifications/progress` every `HEARTBEAT_S` while it runs or
+queues for the lock, when the client asked for progress. A client with an idle
+timeout otherwise aborts a long call that is working: on the field benchmark
+every 89-taxon `infer_tree` went silent for the whole bootstrap and Claude Code
+aborted it at 1822 s, ten runs in ten.
 """
 
 # isort: off  -- engine MUST come before anything that could pull in piqtree.
@@ -22,20 +31,26 @@ from . import engine  # noqa: I001
 # and piqtree ships wheels for 3.12+ only, so this package cannot run on a
 # version where the typing_extensions backport would be required.
 import functools
+import inspect
+import os
 import threading
-from typing import Any, NotRequired, TypedDict
+import time
+import typing
+from typing import Any, Literal, NotRequired, TypedDict
+
+import anyio.from_thread
 
 # mcp 2.x renamed FastMCP to MCPServer and moved it out of mcp.server.fastmcp,
 # which no longer exists. The class is the same one — same decorator, same
 # `annotations` and `structured_output` kwargs — so this is a rename, not a
 # rewrite. ToolAnnotations below did not move.
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from . import __version__, diagnostics, msa, positions
 from . import alignment as aln_mod
-from .inputs import text_or_path
+from .inputs import text_or_path, write_new_file
 from .alignment import (
     MOLTYPES,
     AlignmentError,
@@ -45,12 +60,16 @@ from .alignment import (
     validate,
 )
 from .bootstrap import (
-    DEFAULT_REPLICATES,
     MAX_REPLICATES,
     MIN_REPLICATES,
     STRONG_SUPPORT,
+    UFBOOT_MAX_REPLICATES,
+    UFBOOT_MIN_REPLICATES,
+    UFBOOT_SUPPORT,
     WEAK_SUPPORT,
     bootstrap_support,
+    default_replicates,
+    ufboot_tree,
     validate_replicates,
 )
 from .inference import (
@@ -79,8 +98,18 @@ support. There is no way to ask it for a bare tree, because a bare tree from a
 60-site alignment and one from a 3000-site alignment are indistinguishable to
 look at and one of them is wrong.
 
+Two bootstraps. `support_method="bootstrap"` (the default) is the nonparametric
+one: each replicate is a full ML search, so its cost is replicates x one search
+(on 89 taxa x 435 sites, 25-93 s per replicate: 100 replicates is over an hour).
+`support_method="ufboot"` is IQ-TREE's UFBoot2: 1000 replicates in about the
+time of two or three searches (83 s on the same data). Their values are on
+different scales: nonparametric clades are supported at {WEAK_SUPPORT:.2f},
+UFBoot2 clades at {UFBOOT_SUPPORT:.2f} (Hoang et al. 2018). Each result names its
+method and its own thresholds in `support`. Only the nonparametric method can
+report `conflicting_support`.
+
 Read the output in this order:
-1. `support.fraction_resolved` — the share of clades clearing {WEAK_SUPPORT:.2f}.
+1. `support.fraction_resolved` — the share of clades clearing the method's line.
    Below ~0.7 the tree is partially resolved and should be described that way.
 2. `warnings` with code `conflicting_support` — clades the DATA support that the
    reported tree does NOT contain. A Newick string cannot express these, so they
@@ -100,7 +129,10 @@ accepts as is. An alignment is an inference too — read its `fraction_gaps` and
 
 Data in a file: pass its path (`fasta_path`, `trees_path`) instead of the text.
 The server reads the file itself, so there is no need to read it first or to
-paste it into the call. `map_positions` answers which residue of one sequence
+paste it into the call. `align_sequences(out_path=...)` writes the alignment
+to a new file instead of returning it; pass that path to `infer_tree` or
+`map_positions` as `fasta_path`, rather than copying rows between calls.
+`map_positions` answers which residue of one sequence
 shares an alignment column with a residue of another; do not count columns by
 hand.
 """
@@ -190,7 +222,9 @@ class SimulationResult(TypedDict):
 
 
 class AlignResult(TypedDict):
-    fasta: str
+    # None when `out_path` was given: the rows are in the file at `written_to`.
+    fasta: str | None
+    written_to: str | None
     alignment: AlignmentDict
     sequence_type: str
     # Longest and shortest INPUT sequence. Against `alignment.n_sites` this is
@@ -278,15 +312,17 @@ def _annotate(tree, support_by_clade: dict[str, float], tips: set[str]) -> str:
 def infer_tree(
     fasta: str | None = None,
     model: str = "GTR+G",
-    replicates: int = DEFAULT_REPLICATES,
+    replicates: int | None = None,
     seed: int = 1,
     sequence_type: str = "dna",
     fasta_path: str | None = None,
+    support_method: Literal["bootstrap", "ufboot"] = "bootstrap",
 ) -> TreeResult:
     """Build a maximum-likelihood tree and measure how well the data support it.
 
     Always bootstraps. There is deliberately no option to skip it: an
     unsupported topology is the failure mode this server exists to prevent.
+    `support_method` picks which bootstrap; see its entry for the cost.
 
     Args:
         fasta: Aligned sequences in FASTA, nucleotide or protein as declared by
@@ -295,8 +331,9 @@ def infer_tree(
         model: Substitution model, e.g. "JC", "HKY", "GTR+G" (or "LG+G" for
             protein). Run `select_substitution_model` first if you do not have a
             reason to prefer one.
-        replicates: Bootstrap replicates (20-1000). Cost is roughly linear in
-            this, so 100 is a reasonable default and 1000 is for a final answer.
+        replicates: Bootstrap replicates. Nonparametric: 20-1000, default 100,
+            and each one costs a full ML search, so the call takes about
+            replicates x one search. UFBoot2: 1000-10000, default 1000.
         seed: 0 to 2**31-1. Fixes the column resampling exactly; the engine's
             search is seeded too but is not bit-exact (see `reproducibility`).
         sequence_type: "dna" (default) or "protein". DECLARED, never sniffed: an
@@ -306,24 +343,38 @@ def infer_tree(
             not the nucleotide default — so run select_substitution_model with
             the same sequence_type first.
         fasta_path: Path of a FASTA file to read instead of `fasta`.
+        support_method: "bootstrap" (default): the nonparametric bootstrap,
+            clades supported at 0.70, and the only method that reports
+            well-supported clades the ML tree lacks (`conflicting_support`).
+            "ufboot": IQ-TREE's ultrafast bootstrap (UFBoot2, Hoang et al.
+            2018), clades supported at 0.95; far faster, use it when the
+            nonparametric cost (replicates x one ML search) is too high, e.g.
+            more than a few dozen taxa.
     """
     seqs = _load(text_or_path(fasta, fasta_path, "fasta", "fasta_path"), sequence_type)
+    if replicates is None:
+        replicates = default_replicates(support_method)
     # Every argument check runs BEFORE the maximum-likelihood search. The
     # bootstrap used to be the first thing to look at `replicates` and `seed`,
     # so a bad value was refused only after the most expensive single step had
     # already run.
     engine.validate_seed(seed)
-    validate_replicates(replicates)
+    validate_replicates(replicates, support_method)
     require_model_for(model, sequence_type)
     # Only tree inference needs this. `_load` is shared with tools that can
     # legitimately work on a signal-free alignment, so the check lives here
     # rather than inside validate().
     require_phylogenetic_signal(seqs, sequence_type)
     stats = summarise(seqs, sequence_type)
-    tree = build_ml_tree(seqs, model, seed=seed, moltype=sequence_type)
-    support = bootstrap_support(
-        seqs, tree, model, replicates=replicates, seed=seed, moltype=sequence_type
-    )
+    if support_method == "ufboot":
+        tree, support = ufboot_tree(
+            seqs, model, replicates=replicates, seed=seed, moltype=sequence_type
+        )
+    else:
+        tree = build_ml_tree(seqs, model, seed=seed, moltype=sequence_type)
+        support = bootstrap_support(
+            seqs, tree, model, replicates=replicates, seed=seed, moltype=sequence_type
+        )
     by_clade = {c.as_dict()["clade"]: c.support for c in support.clades}
     newick = tree.get_newick(with_distances=True)
     return TreeResult(
@@ -539,6 +590,7 @@ def align_sequences(
     fasta: str | None = None,
     sequence_type: str = "dna",
     fasta_path: str | None = None,
+    out_path: str | None = None,
 ) -> AlignResult:
     """Align unaligned sequences with MAFFT, ready for `infer_tree`.
 
@@ -553,6 +605,11 @@ def align_sequences(
         sequence_type: "dna" (default) or "protein". Declared, never sniffed,
             and passed to MAFFT explicitly so it does not guess either.
         fasta_path: Path of a FASTA file to read instead of `fasta`.
+        out_path: Write the aligned FASTA to this NEW file (never overwritten;
+            its directory must exist) instead of returning it: `fasta` comes
+            back None and `written_to` holds the absolute path, which
+            `infer_tree`, `select_substitution_model` and `map_positions` take
+            as `fasta_path`. Use it rather than copying rows between calls.
     """
     if sequence_type not in MOLTYPES:
         raise AlignmentError(
@@ -585,8 +642,11 @@ def align_sequences(
             }
         )
     lengths = [len(s) for s in seqs.values()]
+    text = "".join(f">{nm}\n{s}\n" for nm, s in aligned.items())
+    written = None if out_path is None else write_new_file(out_path, text, "out_path")
     return AlignResult(
-        fasta="".join(f">{nm}\n{s}\n" for nm, s in aligned.items()),
+        fasta=None if written else text,
+        written_to=written,
         alignment=stats.__dict__,  # type: ignore[typeddict-item]
         sequence_type=sequence_type,
         input_lengths={"min": min(lengths), "max": max(lengths)},
@@ -698,8 +758,14 @@ def capabilities(include_models: bool = False) -> CapabilitiesResult:
             "max_sites": aln_mod.MAX_SITES,
             "min_replicates": MIN_REPLICATES,
             "max_replicates": MAX_REPLICATES,
+            "ufboot_min_replicates": UFBOOT_MIN_REPLICATES,
+            "ufboot_max_replicates": UFBOOT_MAX_REPLICATES,
         },
-        support_thresholds={"supported": WEAK_SUPPORT, "strong": STRONG_SUPPORT},
+        support_thresholds={
+            "supported": WEAK_SUPPORT,
+            "strong": STRONG_SUPPORT,
+            "ufboot_supported": UFBOOT_SUPPORT,
+        },
         threads_pinned=engine.threads_pinned(),
     )
     if include_models:
@@ -709,6 +775,45 @@ def capabilities(include_models: bool = False) -> CapabilitiesResult:
 
 # One tool call at a time per process; see the module docstring.
 _ENGINE_LOCK = threading.Lock()
+
+# Seconds between progress notifications. Well under any client idle timeout
+# worth having; the env override exists for the protocol test.
+HEARTBEAT_S = float(os.environ.get("PHYLOKIT_HEARTBEAT_S", "15"))
+
+
+def _with_heartbeat(call, ctx: Context | None, name: str):
+    """Run `call`, sending progress every HEARTBEAT_S until it returns.
+
+    The work runs on a helper thread so this worker thread stays free to send.
+    It covers the wait for `_ENGINE_LOCK` too, because `call` takes the lock.
+    `report_progress` is a no-op when the client sent no progress token, so a
+    client that did not ask gets nothing extra. The value is elapsed seconds,
+    which only increases, as the protocol requires.
+    """
+    if ctx is None or HEARTBEAT_S <= 0:
+        return call()
+    box: dict[str, Any] = {}
+
+    def target() -> None:
+        try:
+            box["value"] = call()
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the caller's thread
+            box["error"] = exc
+
+    start = time.monotonic()
+    worker = threading.Thread(target=target, name=f"phylokit-{name}", daemon=True)
+    worker.start()
+    while True:
+        worker.join(HEARTBEAT_S)
+        if not worker.is_alive():
+            break
+        elapsed = round(time.monotonic() - start, 1)
+        anyio.from_thread.run(
+            ctx.report_progress, elapsed, None, f"{name} still running, {elapsed:.0f} s"
+        )
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
 
 
 def _surfaces_refusals(fn):
@@ -736,14 +841,31 @@ def _surfaces_refusals(fn):
     model/molecule checks run before the engine is called at all.
     """
 
+    def locked(*args, **kwargs):
+        with _ENGINE_LOCK:
+            return fn(*args, **kwargs)
+
     @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args, ctx: Context | None = None, **kwargs):
         try:
-            with _ENGINE_LOCK:
-                return fn(*args, **kwargs)
+            return _with_heartbeat(
+                functools.partial(locked, *args, **kwargs), ctx, fn.__name__
+            )
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
 
+    # MCPServer injects a Context into the parameter annotated with it and
+    # leaves it out of the tool's input schema. `functools.wraps` copies the
+    # tool's own signature and annotations, which have no such parameter, so
+    # both are extended here rather than adding `ctx` to every tool function.
+    sig = inspect.signature(fn)
+    ctx_param = inspect.Parameter(
+        "ctx", inspect.Parameter.KEYWORD_ONLY, default=None, annotation=Context | None
+    )
+    wrapper.__signature__ = sig.replace(
+        parameters=[*sig.parameters.values(), ctx_param]
+    )
+    wrapper.__annotations__ = {**typing.get_type_hints(fn), "ctx": Context | None}
     return wrapper
 
 
@@ -785,7 +907,14 @@ def build_server() -> MCPServer:
     )(_surfaces_refusals(simulate_alignment))
     mcp.tool(
         title="Align sequences with MAFFT, ready for infer_tree",
-        annotations=_READ_ONLY,
+        # Not read-only since `out_path`: it can create a file. Never destructive:
+        # an existing file is refused, not overwritten.
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
         structured_output=True,
     )(_surfaces_refusals(align_sequences))
     mcp.tool(

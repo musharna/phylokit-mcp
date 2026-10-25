@@ -1,14 +1,21 @@
 """Nonparametric bootstrap support (Felsenstein 1985, Evolution 39:783-791).
 
-This is computed here rather than read back from IQ-TREE because piqtree 0.8.3
-runs `bootstrap_replicates` but does not expose the resulting support values:
-internal nodes come back carrying only `mprobs`, node names are `edge.N`, and
-nothing is written to disk. Measured on 0.8.3 — if a later release exposes them,
-this module becomes a fallback rather than the only route.
+Two methods. The nonparametric bootstrap is computed here, one full ML search
+per replicate. UFBoot2 (`ufboot_support`) is IQ-TREE's own, read back from the
+tree piqtree returns.
 
-Computing it here has a side benefit worth keeping either way: the full split
-frequency distribution is available, including well-supported clades that are
-NOT in the maximum-likelihood tree. A conflicting clade at 0.70 is the single
+An earlier version of this docstring said piqtree 0.8.3 did not expose UFBoot
+support. It does, as each internal node's `.support` (cogent3 parses a numeric
+internal label into that attribute, not into the name). The measurement that
+said otherwise looked at node names and `params` only. Re-measured 2026-10-25.
+
+Why both. The nonparametric loop costs one ML search per replicate: on the
+field benchmark's 89-taxon, 435-site alignment one replicate took 25-93 s on
+one thread, so 100 replicates outran a 30-minute client budget every time.
+UFBoot2's 1000 replicates took 83 s on the same alignment. The nonparametric
+method keeps the side benefit below, which UFBoot read back this way cannot
+offer: the full split frequency distribution, including well-supported clades
+that are NOT in the maximum-likelihood tree. A conflicting clade at 0.70 is the single
 most informative thing about a tree and no support-annotated Newick string can
 express it, because such a clade has nowhere to attach.
 
@@ -26,6 +33,7 @@ authoritative. The support values are the only thing distinguishing them.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -44,6 +52,18 @@ DEFAULT_REPLICATES = 100
 # and the server says so rather than implying a test was performed.
 WEAK_SUPPORT = 0.70
 STRONG_SUPPORT = 0.95
+
+# UFBoot2 (Hoang et al. 2018, Mol Biol Evol 35:518-522, doi:10.1093/molbev/msx281).
+# Its values are not on the nonparametric scale: the authors' own reading is
+# that a clade is supported at 95 or above, so 0.95 is the one line for both
+# "supported" and "strong". IQ-TREE refuses fewer than 1000 replicates.
+UFBOOT_SUPPORT = 0.95
+UFBOOT_MIN_REPLICATES = 1000
+UFBOOT_MAX_REPLICATES = 10000
+
+NONPARAMETRIC = "nonparametric bootstrap over alignment columns"
+UFBOOT = "ultrafast bootstrap (UFBoot2, IQ-TREE), read from the ML tree"
+SUPPORT_METHODS = ("bootstrap", "ufboot")
 
 
 @dataclass(frozen=True)
@@ -72,13 +92,17 @@ class BootstrapResult:
     mean_support: float
     min_support: float | None
     seed: int
+    method: str = NONPARAMETRIC
+    supported_at: float = WEAK_SUPPORT
+    strong_at: float = STRONG_SUPPORT
 
     @property
     def fraction_resolved(self) -> float:
         """Share of the ML tree's clades that clear the conventional 0.70 line.
 
         This is the headline number: a tree whose clades are mostly unsupported
-        is a drawing, not a result.
+        is a drawing, not a result. "Clear" is the method's own line
+        (`supported_at`), 0.70 nonparametric or 0.95 UFBoot2.
         """
         if self.n_ml_clades == 0:
             return 0.0
@@ -87,7 +111,7 @@ class BootstrapResult:
     def as_dict(self) -> dict:
         return {
             "replicates": self.replicates,
-            "method": "nonparametric bootstrap over alignment columns",
+            "method": self.method,
             "seed": self.seed,
             "n_clades": self.n_ml_clades,
             "n_supported": self.n_supported,
@@ -97,7 +121,10 @@ class BootstrapResult:
             "min_support": None
             if self.min_support is None
             else round(self.min_support, 3),
-            "support_thresholds": {"supported": WEAK_SUPPORT, "strong": STRONG_SUPPORT},
+            "support_thresholds": {
+                "supported": self.supported_at,
+                "strong": self.strong_at,
+            },
             "clades": [c.as_dict() for c in self.clades],
             "conflicting_clades": [c.as_dict() for c in self.conflicting_clades],
         }
@@ -117,7 +144,29 @@ def resample_columns(seqs: dict[str, str], rng: np.random.Generator) -> dict[str
     return {nm: "".join([seqs[nm][i] for i in idx]) for nm in names}
 
 
-def validate_replicates(replicates: int) -> None:
+def validate_support_method(method: str) -> None:
+    if method not in SUPPORT_METHODS:
+        raise ValueError(
+            f"support_method must be one of {list(SUPPORT_METHODS)}, got {method!r}."
+        )
+
+
+def default_replicates(method: str) -> int:
+    """The method's default count. Not a check: `validate_replicates` is."""
+    return UFBOOT_MIN_REPLICATES if method == "ufboot" else DEFAULT_REPLICATES
+
+
+def validate_replicates(replicates: int, method: str = "bootstrap") -> None:
+    validate_support_method(method)
+    if method == "ufboot":
+        if not UFBOOT_MIN_REPLICATES <= replicates <= UFBOOT_MAX_REPLICATES:
+            raise ValueError(
+                f"ufboot replicates must be between {UFBOOT_MIN_REPLICATES} and "
+                f"{UFBOOT_MAX_REPLICATES}, got {replicates}. IQ-TREE refuses UFBoot2 "
+                f"below {UFBOOT_MIN_REPLICATES}; it is cheap enough that the floor "
+                "costs little."
+            )
+        return
     if not MIN_REPLICATES <= replicates <= MAX_REPLICATES:
         raise ValueError(
             f"replicates must be between {MIN_REPLICATES} and {MAX_REPLICATES}, "
@@ -177,3 +226,86 @@ def bootstrap_support(
         min_support=min(values) if values else None,
         seed=seed,
     )
+
+
+def _summarise(
+    clades: list[CladeSupport],
+    conflicting: list[CladeSupport],
+    replicates: int,
+    seed: int,
+    method: str,
+    supported_at: float,
+    strong_at: float,
+) -> BootstrapResult:
+    values = [c.support for c in clades]
+    return BootstrapResult(
+        replicates=replicates,
+        clades=clades,
+        conflicting_clades=conflicting,
+        n_ml_clades=len(clades),
+        n_supported=sum(1 for v in values if v >= supported_at),
+        n_strongly_supported=sum(1 for v in values if v >= strong_at),
+        mean_support=float(np.mean(values)) if values else 0.0,
+        min_support=min(values) if values else None,
+        seed=seed,
+        method=method,
+        supported_at=supported_at,
+        strong_at=strong_at,
+    )
+
+
+def ufboot_tree(
+    seqs: dict[str, str],
+    model: str,
+    replicates: int = UFBOOT_MIN_REPLICATES,
+    seed: int = 1,
+    moltype: str = "dna",
+) -> tuple[Any, BootstrapResult]:
+    """The ML tree and its UFBoot2 support, from ONE IQ-TREE run.
+
+    UFBoot2 is not a separate pass over a finished tree: IQ-TREE samples the
+    replicates during its own ML search, so the tree returned here IS the ML
+    tree, and it replaces `build_ml_tree` for this method. No conflicting-clade
+    list: IQ-TREE annotates only the clades of its tree, so `conflicting_clades`
+    is empty by construction, and the `method` string says so.
+    """
+    validate_replicates(replicates, "ufboot")
+    from .alignment import to_cogent3
+
+    tree = piqtree().build_tree(
+        to_cogent3(seqs, moltype),
+        model,
+        rand_seed=seed,
+        bootstrap_replicates=replicates,
+    )
+    tips = set(seqs)
+    ref = min(tips)
+    support: dict[Split, float] = {}
+    for edge in tree.get_edge_vector(include_root=False):
+        if edge.is_tip():
+            continue
+        below = frozenset(t.name for t in edge.tips())
+        side = below if ref not in below else frozenset(tips) - below
+        if not 2 <= len(side) <= len(tips) - 2:
+            continue
+        value = getattr(edge, "support", None)
+        if value is None:
+            # Fail loud: a silent 0 or a skipped clade would read as "unsupported".
+            raise RuntimeError(
+                f"IQ-TREE returned no UFBoot support for clade {format_split(side)} "
+                f"after {replicates} replicates (piqtree {getattr(piqtree(), '__version__', '?')}). "
+                "The engine's output format has changed; the support cannot be reported."
+            )
+        support[side] = float(value) / 100.0
+    if set(support) != canonical_splits(tree, tips):
+        raise RuntimeError("UFBoot support did not cover every clade of the ML tree.")
+    clades = [
+        CladeSupport(sorted(s), v, True)
+        for s, v in sorted(
+            support.items(), key=lambda kv: (-kv[1], format_split(kv[0]))
+        )
+    ]
+    result = _summarise(
+        clades, [], replicates, seed, UFBOOT, UFBOOT_SUPPORT, UFBOOT_SUPPORT
+    )
+    return tree, result

@@ -18,6 +18,8 @@ import pytest
 from phylokit_mcp.bootstrap import (
     MAX_REPLICATES,
     MIN_REPLICATES,
+    UFBOOT_MIN_REPLICATES,
+    UFBOOT_SUPPORT,
     WEAK_SUPPORT,
     resample_columns,
     validate_replicates,
@@ -307,3 +309,79 @@ def test_replicate_count_is_bounded(bad: int):
 def test_replicate_bounds_are_inclusive():
     validate_replicates(MIN_REPLICATES)
     validate_replicates(MAX_REPLICATES)
+
+
+# --- UFBoot2 ---------------------------------------------------------------
+# The nonparametric loop above costs one full ML search per replicate: 25-93 s
+# each on the 89-taxon field-benchmark alignment (2026-10-25), so 100 replicates
+# ran past the client's 30-minute budget every time. UFBoot2 (Hoang et al. 2018,
+# MBE 35:518, doi:10.1093/molbev/msx281) is IQ-TREE's own fast approximation:
+# 1000 replicates took 83 s on the same alignment.
+
+
+def test_ufboot_separates_the_false_clade_and_calls_it_unsupported(fasta_hard):
+    """The product claim again, under the fast method and its own threshold.
+
+    UFBoot values are read against 0.95 (Hoang 2018), not the nonparametric
+    0.70, so the false clade must fall below 0.95 while a true one clears it.
+    """
+    result = infer_tree(fasta=fasta_hard, model="JC", support_method="ufboot", seed=1)
+    support = result["support"]
+    assert support["method"].startswith("ultrafast bootstrap (UFBoot2")
+    assert support["replicates"] == UFBOOT_MIN_REPLICATES
+    assert support["support_thresholds"] == {
+        "supported": UFBOOT_SUPPORT,
+        "strong": UFBOOT_SUPPORT,
+    }
+    clades = {c["clade"]: c["support"] for c in support["clades"]}
+    assert all(0.0 <= v <= 1.0 for v in clades.values()), clades
+    false_clades = {k: v for k, v in clades.items() if k not in TRUE_CLADES}
+    true_clades = {k: v for k, v in clades.items() if k in TRUE_CLADES}
+    assert false_clades and true_clades
+    assert max(false_clades.values()) < UFBOOT_SUPPORT <= max(true_clades.values()), (
+        f"false={false_clades} true={true_clades}"
+    )
+    assert max(false_clades.values()) < min(true_clades.values())
+    flagged = {
+        c["clade"]
+        for w in result["warnings"]
+        if w["code"] == "unsupported_clades"
+        for c in w["clades"]
+    }
+    assert set(false_clades) <= flagged
+
+
+def test_ufboot_on_the_easy_case_supports_every_true_clade(fasta_easy):
+    """The positive control: the fast method is not just uniformly low."""
+    result = infer_tree(fasta=fasta_easy, model="JC", support_method="ufboot", seed=1)
+    clades = {c["clade"]: c["support"] for c in result["support"]["clades"]}
+    assert set(clades) == TRUE_CLADES
+    assert min(clades.values()) >= UFBOOT_SUPPORT, clades
+    assert result["support"]["fraction_resolved"] == 1.0
+    codes = {w["code"] for w in result["warnings"]}
+    assert not codes & {"unsupported_clades", "poorly_resolved"}
+
+
+def test_ufboot_replicates_follow_iqtrees_floor_and_the_default_follows_the_method(
+    fasta_easy,
+):
+    """IQ-TREE refuses UFBoot below 1000; the refusal is ours, before any search.
+
+    The positive control is in the same test: the method's own floor, and the
+    old default of the nonparametric method, both still run.
+    """
+    with pytest.raises(ValueError, match="ufboot replicates must be between 1000"):
+        infer_tree(
+            fasta=fasta_easy, model="JC", support_method="ufboot", replicates=100
+        )
+    with pytest.raises(ValueError, match="support_method must be one of"):
+        infer_tree(fasta=fasta_easy, model="JC", support_method="jackknife")
+    ok = infer_tree(
+        fasta=fasta_easy, model="JC", support_method="ufboot", replicates=1000
+    )
+    assert ok["support"]["replicates"] == 1000
+    default = infer_tree(fasta=fasta_easy, model="JC", seed=1)
+    assert default["support"]["replicates"] == 100
+    assert (
+        default["support"]["method"] == "nonparametric bootstrap over alignment columns"
+    )
