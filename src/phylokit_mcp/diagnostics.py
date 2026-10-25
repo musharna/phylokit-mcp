@@ -12,7 +12,7 @@ These explain rather than censor.
 from __future__ import annotations
 
 from .alignment import AlignmentStats
-from .bootstrap import STRONG_SUPPORT, WEAK_SUPPORT, BootstrapResult
+from .bootstrap import STRONG_SUPPORT, BootstrapResult
 from .inference import DELTA_INDISTINGUISHABLE
 
 # Below this share of resolved clades the topology is mostly unresolved and
@@ -68,7 +68,7 @@ def conflicting_support(result: BootstrapResult) -> dict | None:
         "code": "conflicting_support",
         "message": (
             f"{len(result.conflicting_clades)} clade(s) reached at least "
-            f"{WEAK_SUPPORT:.2f} support across replicates but are ABSENT from the "
+            f"{result.supported_at:.2f} support across replicates but are ABSENT from the "
             "maximum-likelihood tree. The data support a grouping the reported "
             "topology does not show, so the single best tree is not the whole story."
         ),

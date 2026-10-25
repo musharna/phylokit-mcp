@@ -22,6 +22,7 @@ from phylokit_mcp.bootstrap import (
     UFBOOT_SUPPORT,
     WEAK_SUPPORT,
     resample_columns,
+    support_by_split,
     validate_replicates,
 )
 from phylokit_mcp.engine import IN_PROCESS_DRIFT
@@ -448,3 +449,22 @@ def test_newick_topology_is_the_ml_tree_without_branch_lengths(fasta_hard):
     assert canonical_splits(parse_newick(topo), TIPS) == canonical_splits(
         parse_newick(result["newick"]), TIPS
     )
+
+
+def test_ufboot_support_reads_a_root_bifurcation_from_whichever_edge_is_labelled():
+    """One split, two edges: a root bifurcation carries its split on both.
+
+    Newick writers label only one of the two (review of PR #80). The split's
+    support is known from that one, so the other must not read as "missing";
+    two DIFFERENT labels for one split are a contradiction and are refused.
+    The positive control is the first assertion: every split, right value.
+    """
+    from cogent3 import make_tree
+
+    tips = set("abcdef")
+    got = support_by_split(make_tree("((a,(b,c)90)80,((d,e)70,f));"), tips, 1000)
+    assert got == {frozenset("bc"): 0.9, frozenset("def"): 0.8, frozenset("de"): 0.7}
+    with pytest.raises(RuntimeError, match="carry different UFBoot support"):
+        support_by_split(make_tree("((a,(b,c)90)80,((d,e)70,f)60);"), tips, 1000)
+    with pytest.raises(RuntimeError, match="no UFBoot support for clade b|c"):
+        support_by_split(make_tree("((a,(b,c))80,((d,e)70,f));"), tips, 1000)

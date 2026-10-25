@@ -98,7 +98,7 @@ class BootstrapResult:
 
     @property
     def fraction_resolved(self) -> float:
-        """Share of the ML tree's clades that clear the conventional 0.70 line.
+        """Share of the ML tree's clades that clear the method's "supported" line.
 
         This is the headline number: a tree whose clades are mostly unsupported
         is a drawing, not a result. "Clear" is the method's own line
@@ -279,24 +279,7 @@ def ufboot_tree(
         bootstrap_replicates=replicates,
     )
     tips = set(seqs)
-    ref = min(tips)
-    support: dict[Split, float] = {}
-    for edge in tree.get_edge_vector(include_root=False):
-        if edge.is_tip():
-            continue
-        below = frozenset(t.name for t in edge.tips())
-        side = below if ref not in below else frozenset(tips) - below
-        if not 2 <= len(side) <= len(tips) - 2:
-            continue
-        value = getattr(edge, "support", None)
-        if value is None:
-            # Fail loud: a silent 0 or a skipped clade would read as "unsupported".
-            raise RuntimeError(
-                f"IQ-TREE returned no UFBoot support for clade {format_split(side)} "
-                f"after {replicates} replicates (piqtree {getattr(piqtree(), '__version__', '?')}). "
-                "The engine's output format has changed; the support cannot be reported."
-            )
-        support[side] = float(value) / 100.0
+    support = support_by_split(tree, tips, replicates)
     if set(support) != canonical_splits(tree, tips):
         raise RuntimeError("UFBoot support did not cover every clade of the ML tree.")
     clades = [
@@ -309,3 +292,41 @@ def ufboot_tree(
         clades, [], replicates, seed, UFBOOT, UFBOOT_SUPPORT, UFBOOT_SUPPORT
     )
     return tree, result
+
+
+def support_by_split(tree, tips: set[str], replicates: int) -> dict[Split, float]:
+    """UFBoot2 support per canonical split, read from the internal edges' labels.
+
+    One split can sit on two edges: at a root bifurcation, the two root edges
+    canonicalise to the same split, and Newick writers label only one of them.
+    So a split takes its value from whichever of its edges is labelled. Two
+    different labels for one split are a contradiction, and a split no edge
+    labels is a missing value: both are refused rather than guessed.
+    """
+    ref = min(tips)
+    labels: dict[Split, set[float]] = {}
+    for edge in tree.get_edge_vector(include_root=False):
+        if edge.is_tip():
+            continue
+        below = frozenset(t.name for t in edge.tips())
+        side = below if ref not in below else frozenset(tips) - below
+        if not 2 <= len(side) <= len(tips) - 2:
+            continue
+        value = getattr(edge, "support", None)
+        labels.setdefault(side, set())
+        if value is not None:
+            labels[side].add(float(value))
+    for side, values in labels.items():
+        if len(values) > 1:
+            raise RuntimeError(
+                f"two edges of clade {format_split(side)} carry different UFBoot "
+                f"support ({sorted(values)}); the tree is not a consistent annotation."
+            )
+        if not values:
+            # Fail loud: a silent 0 or a skipped clade would read as "unsupported".
+            raise RuntimeError(
+                f"IQ-TREE returned no UFBoot support for clade {format_split(side)} "
+                f"after {replicates} replicates (piqtree {getattr(piqtree(), '__version__', '?')}). "
+                "The engine's output format has changed; the support cannot be reported."
+            )
+    return {side: values.pop() / 100.0 for side, values in labels.items()}
