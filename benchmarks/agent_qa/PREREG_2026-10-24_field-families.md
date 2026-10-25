@@ -177,3 +177,45 @@ runs nothing.
   runs.
 - Any full run is pre-registered separately. A tie on a full run is an
   acceptable result and will be reported as one.
+
+## Amendment, 2026-10-25: P2 and P3 mcp arm re-run on a revised server
+
+The mcp arm on `phylokit-mcp==0.7.0` lost both headroom families: on P2 it got 0
+of 10 right (alt 4), and on P3 4 right, 0 wrong and 6 timeouts (alt 5). The
+transcripts trace that to three server seams, not to load. P2 failed the same way
+10 of 10 at a load of 13-30.
+
+- **No fast bootstrap, and silence.** `infer_tree` had the nonparametric
+  bootstrap only, one full ML search per replicate. One replicate takes 25-93 s
+  on these alignments, and the call sent nothing until it finished, so Claude
+  Code aborted it at 1822 s.
+- **Inline-only alignment.** `align_sequences` returned the alignment inline only.
+  The arm has no file-writing tool, so the agent retyped ~15 x 962 characters into
+  `infer_tree` and mis-copied a row each time.
+
+The user decided (2026-10-25, "go ahead with 1-3") to fix those seams and re-run
+the mcp arm on P2 and P3.
+
+**This run is exploratory, and is labelled so in every table.** The server was
+changed after the pilot showed what these 20 questions need, so a better score
+here is not a held-out result. A confirmatory claim needs fresh draws from the
+same builder: new seeds, the same discard rules, built before any arm runs.
+
+- **Server:** `git+https://github.com/musharna/phylokit-mcp@dfd248cd5eab98db9b581cea3d9b20102553c89f`
+  (branch `fix/field-seams`, draft PR #80, not released). It adds three things:
+  - `infer_tree(support_method="ufboot")`, IQ-TREE's UFBoot2 with clades
+    supported at 0.95;
+  - a progress heartbeat every 15 s on every tool;
+  - `align_sequences(out_path=...)`.
+  The default support method is unchanged. Nothing tells the agent which method
+  to pick, beyond the tool's own description and server instructions.
+- **Fixed, unchanged from the pilot:** questions, key, bands, scorer, prompt,
+  arm tools (Read + phylokit), model `claude-sonnet-5-5`, 1 rep, 2 workers, and
+  the 1800 s run cap.
+- **Reported:** right / wrong / timeout per question, beside the 0.7.0 mcp arm and
+  the alt arm, plus which `support_method` and `replicates` each run used. A
+  tie or a loss is reported as one.
+- **Results** go to `field_2026-10-24/pilot_mcp_seams/results.jsonl` (their own
+  dir, so `versions.json` pins one server).
+- **Budget:** what is left of the pilot's $40, through the same `LAUNCH_STOP` gate
+  (160.23). The run is estimated at about $9.
