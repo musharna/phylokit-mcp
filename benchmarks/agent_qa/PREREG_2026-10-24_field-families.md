@@ -239,8 +239,10 @@ neither the questions nor any model reply on them has been seen.
 - **Controls before any arm runs** (`tests/test_agent_qa_field_confirm.py`):
   - oracle right and a wrong answer wrong on all 20;
   - the reference pipeline at seed 2 right on all 20;
-  - the discard-rule shortcuts wrong on all of theirs: P2 with every clade
-    reported, and P3 with no alignment;
+  - the named shortcuts wrong on all of theirs:
+    - P2 with every clade reported. A builder discard rule guarantees this one.
+    - P3 with no alignment. No discard rule guarantees it; it is the
+      pilot's 10 of 10 (nRF 0.81-1.0), asserted again here.
   - each truth recomputed from its generator, and the bookkeeping adds up;
   - no kept draw index overlaps the pilot's.
   The pilot's other shortcut counts (no +G, same relative position) are reported,
