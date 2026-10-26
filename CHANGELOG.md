@@ -38,6 +38,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - The bootstrap module said piqtree 0.8.3 does not expose UFBoot support. It
   does, as `.support` on each internal node.
 
+### Security
+
+- `uv.lock` pins certifi 2026.10.23 (was 2026.7.22) for PYSEC-2026-4320, fixed in
+  2026.10.18, and opentelemetry-api 1.45.1 (was 1.44.0) for CVE-2026-114603, fixed
+  in 1.45.1. The lock is what checkouts and CI install; a `uvx` install resolves its own.
+
 ## [0.7.0] — 2026-10-19
 
 ### Added
