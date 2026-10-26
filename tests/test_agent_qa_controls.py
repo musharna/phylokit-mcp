@@ -213,6 +213,36 @@ def test_a_leak_in_a_tool_input_or_output_invalidates_but_the_runs_own_dir_does_
     assert home["leaks"] == []
 
 
+def test_the_runs_own_dir_in_claude_codes_dashed_form_is_not_a_leak() -> None:
+    """Claude Code writes a background task's output under the run's own dir,
+    in a folder named for the cwd with ``/`` and ``_`` turned into ``-``. The
+    2026-10-25 confirmatory run flagged alt p2q03 and p3q07 as leaks on this
+    path alone (``phyloqa-alt-6alf`` read as another run's dir). The paths
+    below are copied from p3q07's transcript."""
+    import re
+    import tempfile
+
+    own = "/tmp/phyloqa-alt-6alf_1m7/cwd"
+    task = (
+        "/tmp/phyloqa-alt-6alf_1m7/tmp/claude-1000/-tmp-phyloqa-alt-6alf-1m7-cwd/"
+        "a6169b49-8958-41c7-b965-2eb0786c8ae5/tasks/b5i4o5o16.output"
+    )
+    ev = _events(ALT, [("Bash", {"command": f"cat {task}"})], [task])
+    assert run.leak_hits(ev, own) == []
+    # Another run's dir, in either form, is still a leak.
+    for other in ("/tmp/phyloqa-alt-6alf_1m8/cwd/x",
+                  "/tmp/q/-tmp-phyloqa-alt-6alf-1m8-cwd/x",
+                  "/tmp/q/-tmp-phyloqa-mcp-6alf-1m7-cwd/x"):  # fmt: skip
+        ev = _events(ALT, [("Bash", {"command": f"cat {other}"})])
+        assert run.leak_hits(ev, own) != [], other
+    # Real execution: the dir names tempfile makes here, in both forms.
+    for _ in range(50):
+        with tempfile.TemporaryDirectory(prefix="phyloqa-alt-") as d:
+            dashed = re.sub(r"[^A-Za-z0-9]", "-", f"{d}/cwd")
+            ev = _events(ALT, [("Bash", {"command": f"ls {d}/tmp/{dashed}"})])
+            assert run.leak_hits(ev, f"{d}/cwd") == [], d
+
+
 def test_a_run_directory_that_names_the_benchmark_is_refused_before_the_run() -> None:
     """The 2026-10-17 read-arm restart put run directories under
     ~/phylokit-mcp-artifacts/agent_qa/tmp; every Read path then named both,

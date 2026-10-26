@@ -182,7 +182,9 @@ LEAK_PATTERNS = (
     r"phylokit-mcp-artifacts/agent_qa/runs",
     r"(?:github\.com|githubusercontent\.com)/musharna/phylokit-mcp\S*benchmarks",
 )
-RUN_DIR = re.compile(r"phyloqa-[a-z]+-[\w]+")
+# tempfile's 8-character suffix, as written or in the form Claude Code uses
+# for a background task's output folder (the cwd with "/" and "_" as "-").
+RUN_DIR = re.compile(r"phyloqa-[a-z]+-[a-z0-9_-]{8}")
 SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
 # Every arm gets this in place of Claude Code's own system prompt. That prompt
 # describes tools even when --tools "" removes them all; in the sibling
@@ -455,14 +457,14 @@ def leak_hits(
     """Every forbidden string in any tool input or output (LEAK_PATTERNS, plus
     any run directory that is not this run's own); with ``narrow`` (the primary
     rule since 2026-10-21), after ``mask_tool_paths``."""
-    own = Path(own_cwd).parent.name if own_cwd else None
+    own = Path(own_cwd).parent.name.replace("_", "-") if own_cwd else None
     hits: list[str] = []
     for text in _tool_inputs(events) + _tool_outputs(events):
         if narrow:
             text = mask_tool_paths(text)
         for pat in LEAK_PATTERNS:
             hits += re.findall(pat, text)
-        hits += [m for m in RUN_DIR.findall(text) if m != own]
+        hits += [m for m in RUN_DIR.findall(text) if m.replace("_", "-") != own]
     return sorted(set(hits))
 
 
