@@ -73,11 +73,11 @@ limitations are in [benchmarks/agent_qa](https://github.com/musharna/phylokit-mc
 
 | Tool                        | What it does                                                                       |
 | --------------------------- | ---------------------------------------------------------------------------------- |
-| `infer_tree`                | ML tree **plus** bootstrap support, per clade.                                     |
+| `infer_tree`                | ML tree **plus** bootstrap support (nonparametric or UFBoot2), per clade.          |
 | `select_substitution_model` | Ranks 100+ models with ΔAIC/AICc/BIC, and says when the criteria disagree.         |
 | `compare_trees`             | Robinson–Foulds distance and the clades that differ. Compares splits, not strings. |
 | `simulate_alignment`        | Generates sequences along a tree you specify: the positive control.                |
-| `align_sequences`           | Aligns unaligned FASTA with MAFFT; the output goes straight into `infer_tree`.     |
+| `align_sequences`           | Aligns unaligned FASTA with MAFFT, inline or to a new file (`out_path`).           |
 | `map_positions`             | Maps a residue to its alignment column, and that column to every other sequence.   |
 | `capabilities`              | piqtree and IQ-TREE versions, 215 substitution models, MAFFT version, limits.      |
 
@@ -132,11 +132,16 @@ equality. Measurements: [docs/REPRODUCIBILITY.md](https://github.com/musharna/ph
   sniffed**: an A/C/G/T-only alignment is also valid protein (Ala/Cys/Gly/Thr),
   and a wrong guess returns a wrong tree, likelihood and support with no
   warning.
-- **Bootstrap only**: no aLRT, approximate Bayes or UFBoot. Support is the
-  nonparametric bootstrap (Felsenstein 1985), computed here because piqtree
-  0.8.3 runs `bootstrap_replicates` but does not expose the values.
-- **Cost is linear in replicates**, each a full ML search. Capped at 200 taxa
-  and 1000 replicates.
+- **Two bootstraps, no aLRT or approximate Bayes.** The default is the
+  nonparametric bootstrap (Felsenstein 1985), computed here, clades supported
+  at 0.70; it is the only one that reports well-supported clades missing from
+  the ML tree. `support_method="ufboot"` is IQ-TREE's UFBoot2 (Hoang et al.
+  2018), clades supported at 0.95.
+- **Nonparametric cost is linear in replicates**, each a full ML search: on 89
+  taxa x 435 sites one replicate took 25-93 s, and 1000 UFBoot2 replicates 83 s.
+  Capped at 200 taxa, 1000 nonparametric and 10000 UFBoot2 replicates. Every
+  tool sends a progress notification every 15 s, so a client idle timeout does
+  not abort a long call.
 - **Alignment is MAFFT `--auto`, single-threaded, and nothing else**: no
   strategy choice, profile alignment or trimming; at most 200 sequences of
   100,000 residues and 600 s. Gapped input is refused, not degapped. The tree

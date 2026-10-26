@@ -6,6 +6,36 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- `infer_tree(support_method="ufboot")`: IQ-TREE's ultrafast bootstrap
+  (UFBoot2, Hoang et al. 2018), 1000-10000 replicates, clades supported at
+  0.95. On the field benchmark's 89-taxon alignment, 1000 UFBoot2 replicates
+  took 83 s; one nonparametric replicate took 25-93 s. The default is still
+  the nonparametric bootstrap, and `replicates` now defaults by method (100 or
+  1000). `capabilities` lists both methods' limits and thresholds.
+- Progress heartbeat: every tool sends `notifications/progress` every 15 s
+  while it runs or waits for the engine lock, when the client sent a progress
+  token. Claude Code aborted every silent 89-taxon bootstrap at 1822 s.
+- `align_sequences(out_path=...)` writes the alignment to a new file (never
+  overwritten) and returns its path in `written_to`, with `fasta` None, for
+  clients that cannot write files. The tool is no longer marked read-only.
+- `infer_tree` returns `newick_supported`, the ML tree with every clade below
+  the method's own line collapsed, and `newick_topology`, the ML tree without
+  branch lengths. On the field benchmark every miss of the revised server (10
+  of 20) was a tree the agent re-typed from the output and broke.
+
+### Fixed
+
+- An in-process call (`mcp.call_tool`) has a Context with no request; the
+  heartbeat raised on it after 15 s and left the engine call running on its
+  helper thread, which broke the next calls' file descriptors. Such calls now
+  get no heartbeat, and a heartbeat that fails to send fails the call only
+  after the work has finished.
+
+- The bootstrap module said piqtree 0.8.3 does not expose UFBoot support. It
+  does, as `.support` on each internal node.
+
 ## [0.7.0] — 2026-10-19
 
 ### Added

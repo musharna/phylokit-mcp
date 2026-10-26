@@ -12,7 +12,7 @@ These explain rather than censor.
 from __future__ import annotations
 
 from .alignment import AlignmentStats
-from .bootstrap import STRONG_SUPPORT, WEAK_SUPPORT, BootstrapResult
+from .bootstrap import STRONG_SUPPORT, BootstrapResult
 from .inference import DELTA_INDISTINGUISHABLE
 
 # Below this share of resolved clades the topology is mostly unresolved and
@@ -24,14 +24,16 @@ THIN_INFORMATION = 10
 
 
 def unsupported_clades(result: BootstrapResult) -> dict | None:
-    weak = [c.as_dict() for c in result.clades if c.support < WEAK_SUPPORT]
+    # The method's own line: 0.70 nonparametric, 0.95 UFBoot2.
+    line = result.supported_at
+    weak = [c.as_dict() for c in result.clades if c.support < line]
     if not weak:
         return None
     return {
         "code": "unsupported_clades",
         "message": (
             f"{len(weak)} of {result.n_ml_clades} clades in this tree fall below "
-            f"{WEAK_SUPPORT:.2f} bootstrap support. Those groupings are not "
+            f"{line:.2f} bootstrap support. Those groupings are not "
             "distinguishable from alternatives given these data — the tree draws "
             "them with the same confidence as the rest, but they are not results."
         ),
@@ -45,7 +47,7 @@ def poorly_resolved(result: BootstrapResult) -> dict | None:
     return {
         "code": "poorly_resolved",
         "message": (
-            f"Only {result.fraction_resolved:.0%} of clades clear {WEAK_SUPPORT:.2f} "
+            f"Only {result.fraction_resolved:.0%} of clades clear {result.supported_at:.2f} "
             "support. Treat this as a partially resolved tree; collapsing the "
             "unsupported nodes to a polytomy is the honest representation."
         ),
@@ -66,7 +68,7 @@ def conflicting_support(result: BootstrapResult) -> dict | None:
         "code": "conflicting_support",
         "message": (
             f"{len(result.conflicting_clades)} clade(s) reached at least "
-            f"{WEAK_SUPPORT:.2f} support across replicates but are ABSENT from the "
+            f"{result.supported_at:.2f} support across replicates but are ABSENT from the "
             "maximum-likelihood tree. The data support a grouping the reported "
             "topology does not show, so the single best tree is not the whole story."
         ),
@@ -93,7 +95,7 @@ def thin_information(
     per_taxon = stats.n_parsimony_informative / max(1, stats.n_taxa)
     if per_taxon >= THIN_INFORMATION:
         return None
-    if result is not None and (result.min_support or 0.0) >= WEAK_SUPPORT:
+    if result is not None and (result.min_support or 0.0) >= result.supported_at:
         # Every clade cleared the line, so the information was evidently
         # sufficient. Keyed on the weakest clade rather than on the RESOLVED
         # FRACTION deliberately: what this advisory explains is an unsupported
