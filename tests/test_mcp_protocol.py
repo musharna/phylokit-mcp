@@ -14,6 +14,7 @@ class of bug.
 from __future__ import annotations
 
 import json
+import os
 import selectors
 import subprocess
 import sys
@@ -274,3 +275,110 @@ def test_importing_the_module_does_not_construct_a_server():
         "phylokit_mcp.server has a module-level `mcp` again -- importing the "
         "module now constructs a server, which is what build_server() replaced"
     )
+
+
+def test_long_calls_send_progress_so_a_client_idle_timeout_does_not_fire(fasta_easy):
+    """Heartbeats reach a real client while a call runs AND while it waits.
+
+    Claude Code aborts a tool call that sends "no response or progress" for its
+    idle timeout. On the field benchmark every 89-taxon `infer_tree` was silent
+    for the whole bootstrap and was aborted at 1822 s, ten runs in ten. The
+    server now sends `notifications/progress` every PHYLOKIT_HEARTBEAT_S while a
+    tool runs -- and while it queues behind `_ENGINE_LOCK`, which is silent too.
+
+    Real process, real stdio: piqtree points fds 1 and 2 at /dev/null during
+    every engine call, so a notification written to fd 1 then would be lost.
+    This test is what shows the wire is not fd 1 (mcp's stdio transport serves
+    it from a private duplicate) -- a fixture could not.
+    """
+    env = {**os.environ, "PHYLOKIT_HEARTBEAT_S": "0.25"}
+    calls = {
+        3: {"fasta": fasta_easy, "model": "JC", "replicates": 100, "seed": 1},
+        4: {"fasta": fasta_easy, "model": "JC", "replicates": 100, "seed": 2},
+    }
+    with tempfile.TemporaryFile(mode="w+") as stderr_file:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "phylokit_mcp.server"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr_file,
+            text=True,
+            bufsize=1,
+            env=env,
+        )
+        stdin, stdout = proc.stdin, proc.stdout
+        assert stdin is not None and stdout is not None
+        try:
+            init = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0"},
+                },
+            }
+            stdin.write(json.dumps(init) + "\n")
+            stdin.flush()
+            _read_until(stdout, {1}, stderr_file)
+            stdin.write(
+                json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"})
+                + "\n"
+            )
+            # Sent together: the second queues behind the engine lock.
+            for rid, args in calls.items():
+                msg = {
+                    "jsonrpc": "2.0",
+                    "id": rid,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "infer_tree",
+                        "arguments": args,
+                        "_meta": {"progressToken": f"tok{rid}"},
+                    },
+                }
+                stdin.write(json.dumps(msg) + "\n")
+            stdin.flush()
+
+            progress: dict[str, list[float]] = {"tok3": [], "tok4": []}
+            done: dict[int, dict] = {}
+            sel = selectors.DefaultSelector()
+            sel.register(stdout, selectors.EVENT_READ)
+            deadline = time.monotonic() + HANDSHAKE_TIMEOUT
+            while set(done) != set(calls) and time.monotonic() < deadline:
+                if not sel.select(timeout=deadline - time.monotonic()):
+                    break
+                line = stdout.readline().strip()
+                if not line.startswith("{"):
+                    if not line:
+                        break
+                    continue
+                msg = json.loads(line)
+                if msg.get("method") == "notifications/progress":
+                    p = msg["params"]
+                    progress[p["progressToken"]].append(p["progress"])
+                elif msg.get("id") in calls:
+                    done[msg["id"]] = msg
+            sel.close()
+            stderr_file.seek(0)
+            assert set(done) == set(calls), stderr_file.read()[-2000:]
+        finally:
+            if not stdin.closed:
+                stdin.close()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=30)
+
+    # Positive control: both calls still return their trees.
+    for rid in calls:
+        res = done[rid]["result"]
+        assert not res.get("isError"), res
+        assert res["structuredContent"]["support"]["replicates"] == 100
+    # Each call heartbeat at least twice, and the values only go up (the spec
+    # requires progress to increase with each notification).
+    for tok, values in progress.items():
+        assert len(values) >= 2, (tok, values)
+        assert values == sorted(values) and len(set(values)) == len(values), values

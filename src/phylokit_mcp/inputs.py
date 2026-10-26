@@ -93,3 +93,34 @@ def text_or_path(
             f"Give {text_name} (the text inline) or {path_name} (the path of a file)."
         )
     return text
+
+
+def write_new_file(path: str, text: str, param: str) -> str:
+    """Write `text` to a file that must not exist yet; return its absolute path.
+
+    The output side of the path inputs above, for a client that cannot write a
+    file itself (the field benchmark's server arm had only Read, so it retyped
+    the alignment `align_sequences` returned and mis-copied a row each time).
+
+    Never over an existing file: `open(..., "x")` refuses atomically, so a
+    path that appears between a check and the write is still not clobbered.
+    The parent directory must exist; nothing is created on the caller's behalf.
+    Relative paths resolve against this process's working directory, as above.
+    """
+    if not isinstance(path, str) or not path.strip():
+        raise InputFileError(f"{param} is empty; give the path of a new file.")
+    p = Path(path).expanduser()
+    where = f" (relative paths resolve against the server's working directory, {os.getcwd()})"
+    shown = str(p) if p.is_absolute() else f"{p}{where}"
+    if not p.parent.is_dir():
+        raise InputFileError(f"{param}: no such directory: {p.parent} for {shown}.")
+    try:
+        with open(p, "x", encoding="utf-8") as fh:
+            fh.write(text)
+    except FileExistsError:
+        raise InputFileError(
+            f"{param}: {shown} already exists; give a new path (it is never overwritten)."
+        ) from None
+    except OSError as exc:
+        raise InputFileError(f"{param}: cannot write {shown}: {exc}.") from None
+    return str(p.resolve())

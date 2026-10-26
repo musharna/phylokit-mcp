@@ -18,14 +18,21 @@ import pytest
 from phylokit_mcp.bootstrap import (
     MAX_REPLICATES,
     MIN_REPLICATES,
+    UFBOOT_MIN_REPLICATES,
+    UFBOOT_SUPPORT,
     WEAK_SUPPORT,
     resample_columns,
+    support_by_split,
     validate_replicates,
 )
 from phylokit_mcp.engine import IN_PROCESS_DRIFT
+from phylokit_mcp.newick import parse_newick
 from phylokit_mcp.server import compare_trees, infer_tree
+from phylokit_mcp.splits import canonical_splits, format_split, splits_to_newick
 
 from .conftest import TRUE_CLADES
+
+TIPS = set("ABCDEFG")
 
 
 def test_a_long_alignment_recovers_the_true_tree(fasta_easy, easy_alignment):
@@ -307,3 +314,157 @@ def test_replicate_count_is_bounded(bad: int):
 def test_replicate_bounds_are_inclusive():
     validate_replicates(MIN_REPLICATES)
     validate_replicates(MAX_REPLICATES)
+
+
+# --- UFBoot2 ---------------------------------------------------------------
+# The nonparametric loop above costs one full ML search per replicate: 25-93 s
+# each on the 89-taxon field-benchmark alignment (2026-10-25), so 100 replicates
+# ran past the client's 30-minute budget every time. UFBoot2 (Hoang et al. 2018,
+# MBE 35:518, doi:10.1093/molbev/msx281) is IQ-TREE's own fast approximation:
+# 1000 replicates took 83 s on the same alignment.
+
+
+def test_ufboot_separates_the_false_clade_and_calls_it_unsupported(fasta_hard):
+    """The product claim again, under the fast method and its own threshold.
+
+    UFBoot values are read against 0.95 (Hoang 2018), not the nonparametric
+    0.70, so the false clade must fall below 0.95 while a true one clears it.
+    """
+    result = infer_tree(fasta=fasta_hard, model="JC", support_method="ufboot", seed=1)
+    support = result["support"]
+    assert support["method"].startswith("ultrafast bootstrap (UFBoot2")
+    assert support["replicates"] == UFBOOT_MIN_REPLICATES
+    assert support["support_thresholds"] == {
+        "supported": UFBOOT_SUPPORT,
+        "strong": UFBOOT_SUPPORT,
+    }
+    clades = {c["clade"]: c["support"] for c in support["clades"]}
+    assert all(0.0 <= v <= 1.0 for v in clades.values()), clades
+    false_clades = {k: v for k, v in clades.items() if k not in TRUE_CLADES}
+    true_clades = {k: v for k, v in clades.items() if k in TRUE_CLADES}
+    assert false_clades and true_clades
+    assert max(false_clades.values()) < UFBOOT_SUPPORT <= max(true_clades.values()), (
+        f"false={false_clades} true={true_clades}"
+    )
+    assert max(false_clades.values()) < min(true_clades.values())
+    flagged = {
+        c["clade"]
+        for w in result["warnings"]
+        if w["code"] == "unsupported_clades"
+        for c in w["clades"]
+    }
+    assert set(false_clades) <= flagged
+
+
+def test_ufboot_on_the_easy_case_supports_every_true_clade(fasta_easy):
+    """The positive control: the fast method is not just uniformly low."""
+    result = infer_tree(fasta=fasta_easy, model="JC", support_method="ufboot", seed=1)
+    clades = {c["clade"]: c["support"] for c in result["support"]["clades"]}
+    assert set(clades) == TRUE_CLADES
+    assert min(clades.values()) >= UFBOOT_SUPPORT, clades
+    assert result["support"]["fraction_resolved"] == 1.0
+    codes = {w["code"] for w in result["warnings"]}
+    assert not codes & {"unsupported_clades", "poorly_resolved"}
+
+
+def test_ufboot_replicates_follow_iqtrees_floor_and_the_default_follows_the_method(
+    fasta_easy,
+):
+    """IQ-TREE refuses UFBoot below 1000; the refusal is ours, before any search.
+
+    The positive control is in the same test: the method's own floor, and the
+    old default of the nonparametric method, both still run.
+    """
+    with pytest.raises(ValueError, match="ufboot replicates must be between 1000"):
+        infer_tree(
+            fasta=fasta_easy, model="JC", support_method="ufboot", replicates=100
+        )
+    with pytest.raises(ValueError, match="support_method must be one of"):
+        infer_tree(fasta=fasta_easy, model="JC", support_method="jackknife")
+    ok = infer_tree(
+        fasta=fasta_easy, model="JC", support_method="ufboot", replicates=1000
+    )
+    assert ok["support"]["replicates"] == 1000
+    default = infer_tree(fasta=fasta_easy, model="JC", seed=1)
+    assert default["support"]["replicates"] == 100
+    assert (
+        default["support"]["method"] == "nonparametric bootstrap over alignment columns"
+    )
+
+
+@pytest.mark.parametrize("method", ["bootstrap", "ufboot"])
+def test_newick_supported_holds_exactly_the_clades_at_the_methods_line(
+    fasta_hard, method
+):
+    """The tree a caller reports: every clade below the line collapsed.
+
+    The poorly-resolved advisory already says collapsing unsupported nodes is
+    the honest representation, but the server never returned that tree. On the
+    field benchmark the agent rebuilt it by hand from ~86 clades and dropped a
+    parenthesis on 3 of its first 4 answers (2026-10-25).
+    """
+    result = infer_tree(fasta=fasta_hard, model="JC", support_method=method, seed=1)
+    line = result["support"]["support_thresholds"]["supported"]
+    want = {c["clade"] for c in result["support"]["clades"] if c["support"] >= line}
+    got = {
+        format_split(s)
+        for s in canonical_splits(parse_newick(result["newick_supported"]), TIPS)
+    }
+    assert got == want
+    # Not vacuous: the hard case has a clade below the line, so the collapsed
+    # tree is strictly smaller than the ML tree; every tip is still there.
+    assert len(want) < len(result["support"]["clades"])
+    assert set(parse_newick(result["newick_supported"]).get_tip_names()) == TIPS
+
+
+def test_newick_supported_is_the_full_ml_topology_when_every_clade_clears(fasta_easy):
+    """Positive control: nothing is collapsed when nothing falls below the line."""
+    result = infer_tree(fasta=fasta_easy, model="JC", support_method="ufboot", seed=1)
+    got = {
+        format_split(s)
+        for s in canonical_splits(parse_newick(result["newick_supported"]), TIPS)
+    }
+    assert got == TRUE_CLADES
+
+
+def test_splits_to_newick_builds_polytomies_and_refuses_incompatible_splits():
+    tips = {"a", "b", "c", "d", "e", "f"}
+    star = splits_to_newick(tips, set())
+    assert canonical_splits(parse_newick(star), tips) == set()
+    two = {frozenset({"b", "c"}), frozenset({"d", "e", "f"})}
+    assert canonical_splits(parse_newick(splits_to_newick(tips, two)), tips) == two
+    with pytest.raises(ValueError, match="not compatible"):
+        splits_to_newick(tips, {frozenset({"b", "c"}), frozenset({"c", "d"})})
+
+
+def test_newick_topology_is_the_ml_tree_without_branch_lengths(fasta_hard):
+    """The ML tree as a caller writes it in an answer: same splits, no lengths.
+
+    On the field benchmark the agent stripped the lengths from `newick` by hand
+    and dropped a parenthesis on 2 of its first 5 P3 answers (2026-10-25).
+    """
+    result = infer_tree(fasta=fasta_hard, model="JC", replicates=20, seed=1)
+    topo = result["newick_topology"]
+    assert ":" not in topo
+    assert canonical_splits(parse_newick(topo), TIPS) == canonical_splits(
+        parse_newick(result["newick"]), TIPS
+    )
+
+
+def test_ufboot_support_reads_a_root_bifurcation_from_whichever_edge_is_labelled():
+    """One split, two edges: a root bifurcation carries its split on both.
+
+    Newick writers label only one of the two (review of PR #80). The split's
+    support is known from that one, so the other must not read as "missing";
+    two DIFFERENT labels for one split are a contradiction and are refused.
+    The positive control is the first assertion: every split, right value.
+    """
+    from cogent3 import make_tree
+
+    tips = set("abcdef")
+    got = support_by_split(make_tree("((a,(b,c)90)80,((d,e)70,f));"), tips, 1000)
+    assert got == {frozenset("bc"): 0.9, frozenset("def"): 0.8, frozenset("de"): 0.7}
+    with pytest.raises(RuntimeError, match="carry different UFBoot support"):
+        support_by_split(make_tree("((a,(b,c)90)80,((d,e)70,f)60);"), tips, 1000)
+    with pytest.raises(RuntimeError, match="no UFBoot support for clade b|c"):
+        support_by_split(make_tree("((a,(b,c))80,((d,e)70,f));"), tips, 1000)

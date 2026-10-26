@@ -322,3 +322,38 @@ def test_a_broken_aligner_is_reported_by_capabilities_not_a_crash(
     monkeypatch.setenv("PATH", real_path)
     caps = capabilities()
     assert caps["aligner_version"].startswith("v") and caps["aligner_error"] is None
+
+
+def test_out_path_writes_the_alignment_infer_tree_reads_by_path(fasta_easy, tmp_path):
+    """The handoff without retyping: align to a file, infer from that file.
+
+    A client with no file-writing tool of its own (the field benchmark's server
+    arm had only Read) used to copy ~15 x 962 aligned characters from
+    `align_sequences` into `infer_tree`, mis-copied one row each time, and was
+    refused as ragged 13 times in one run. With `out_path` nothing is copied.
+    """
+    seqs = parse_fasta(fasta_easy)
+    ragged = {nm: s[:30] + s[36:] if nm == "A" else s for nm, s in seqs.items()}
+    out = tmp_path / "aligned.fasta"
+
+    res = align_sequences(_fasta(ragged), out_path=str(out))
+    assert res["written_to"] == str(out.resolve())
+    assert res["fasta"] is None, "the rows live in the file, not in the reply"
+    rows = parse_fasta(out.read_text())
+    assert set(rows) == set(seqs)
+    assert len({len(s) for s in rows.values()}) == 1
+    assert {nm: s.replace("-", "") for nm, s in rows.items()} == ragged
+    tree = infer_tree(fasta_path=res["written_to"], model="JC", replicates=20)
+    assert compare_trees(tree["newick"], TRUE_NEWICK)["identical_topology"] is True
+
+    # Never over an existing file, and the refusal leaves it as it was.
+    before = out.read_bytes()
+    with pytest.raises(ValueError, match="out_path: .* already exists"):
+        align_sequences(_fasta(ragged), out_path=str(out))
+    assert out.read_bytes() == before
+    with pytest.raises(ValueError, match="out_path: no such directory"):
+        align_sequences(_fasta(ragged), out_path=str(tmp_path / "nope" / "a.fasta"))
+    # Without out_path the reply is unchanged: inline FASTA, nothing written.
+    inline = align_sequences(_fasta(ragged))
+    assert inline["written_to"] is None
+    assert parse_fasta(inline["fasta"]) == rows

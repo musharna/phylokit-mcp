@@ -28,6 +28,7 @@
    "bootstrap.py:bootstrap_support.<locals>.<lambda>": 4,
    "bootstrap.py:resample_columns": 20,
    "bootstrap.py:validate_replicates": 2,
+   "bootstrap.py:validate_support_method": 2,
    "diagnostics.py:collect": 1,
    "diagnostics.py:conflicting_support": 1,
    "diagnostics.py:duplicate_sequences": 1,
@@ -54,7 +55,11 @@
    "server.py:infer_tree": 1,
    "splits.py:canonical_splits": 21,
    "splits.py:canonical_splits.<locals>.<genexpr>": 147,
-   "splits.py:format_split": 8
+   "splits.py:format_split": 15,
+   "splits.py:splits_to_newick": 1,
+   "splits.py:splits_to_newick.<locals>.<genexpr>": 5,
+   "splits.py:splits_to_newick.<locals>.<lambda>": 5,
+   "splits.py:splits_to_newick.<locals>.render": 3
   },
   "engine_calls": {
    "piqtree:StandardDnaModelInstance.model_type": 1,
