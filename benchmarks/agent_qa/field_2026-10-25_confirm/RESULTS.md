@@ -56,6 +56,10 @@ directory reads as a foreign one (`phyloqa-alt-6alf`). No run read another run's
 files or the key (`mentions_key` is false on all 40). The pre-registered rule
 was applied as written.
 
+Fixed in 6552d68: `RUN_DIR` now matches the 8-character suffix in either form.
+A rescan of these 40 transcripts with the fixed rule flags nothing, so the
+corrected count is the 9:0 above. `results.jsonl` is left as scored.
+
 ## Files
 
 - `results.jsonl`: 40 rows.
