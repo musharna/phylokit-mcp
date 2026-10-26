@@ -213,6 +213,36 @@ def test_a_leak_in_a_tool_input_or_output_invalidates_but_the_runs_own_dir_does_
     assert home["leaks"] == []
 
 
+def test_the_runs_own_dir_in_claude_codes_dashed_form_is_not_a_leak() -> None:
+    """Claude Code writes a background task's output under the run's own dir,
+    in a folder named for the cwd with ``/`` and ``_`` turned into ``-``. The
+    2026-10-25 confirmatory run flagged alt p2q03 and p3q07 as leaks on this
+    path alone (``phyloqa-alt-6alf`` read as another run's dir). The paths
+    below are copied from p3q07's transcript."""
+    import re
+    import tempfile
+
+    own = "/tmp/phyloqa-alt-6alf_1m7/cwd"
+    task = (
+        "/tmp/phyloqa-alt-6alf_1m7/tmp/claude-1000/-tmp-phyloqa-alt-6alf-1m7-cwd/"
+        "a6169b49-8958-41c7-b965-2eb0786c8ae5/tasks/b5i4o5o16.output"
+    )
+    ev = _events(ALT, [("Bash", {"command": f"cat {task}"})], [task])
+    assert run.leak_hits(ev, own) == []
+    # Another run's dir, in either form, is still a leak.
+    for other in ("/tmp/phyloqa-alt-6alf_1m8/cwd/x",
+                  "/tmp/q/-tmp-phyloqa-alt-6alf-1m8-cwd/x",
+                  "/tmp/q/-tmp-phyloqa-mcp-6alf-1m7-cwd/x"):  # fmt: skip
+        ev = _events(ALT, [("Bash", {"command": f"cat {other}"})])
+        assert run.leak_hits(ev, own) != [], other
+    # Real execution: the dir names tempfile makes here, in both forms.
+    for _ in range(50):
+        with tempfile.TemporaryDirectory(prefix="phyloqa-alt-") as d:
+            dashed = re.sub(r"[^A-Za-z0-9]", "-", f"{d}/cwd")
+            ev = _events(ALT, [("Bash", {"command": f"ls {d}/tmp/{dashed}"})])
+            assert run.leak_hits(ev, f"{d}/cwd") == [], d
+
+
 def test_a_run_directory_that_names_the_benchmark_is_refused_before_the_run() -> None:
     """The 2026-10-17 read-arm restart put run directories under
     ~/phylokit-mcp-artifacts/agent_qa/tmp; every Read path then named both,
@@ -454,7 +484,7 @@ def test_the_gate_holds_later_runs_and_stops_on_another_model(
 ) -> None:
     calls: list[str] = []
 
-    def fake_run_one(arm: str, q: dict, rep: int, spec: str) -> dict:
+    def fake_run_one(arm: str, q: dict, rep: int, spec: str, web: bool = True) -> dict:
         calls.append(q["id"])
         path = run.transcript(arm, q["id"], rep)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -700,7 +730,7 @@ def test_every_row_records_the_load_average_at_its_start_and_end(
     monkeypatch.setattr(run, "RUNS", tmp_path)
     monkeypatch.setattr(run.os, "getloadavg", lambda: next(loads))
     monkeypatch.setattr(run.shutil, "which", lambda name: "/usr/bin/" + name)
-    monkeypatch.setattr(run, "arm_setup", lambda arm, tmp, spec: ([], {}))
+    monkeypatch.setattr(run, "arm_setup", lambda arm, tmp, spec, web=True: ([], {}))
     monkeypatch.setattr(run.subprocess, "run", fake_run)
     r = run.run_one("bare", q, 1)
     assert (r["load1_start"], r["load1_end"], r["exit"]) == (7.5, 9.25, 0)
@@ -717,7 +747,7 @@ def test_a_failed_dns_precheck_stops_the_sweep_before_the_run_starts(
     run starts."""
     calls: list[str] = []
 
-    def fake_run_one(arm: str, q: dict, rep: int, spec: str) -> dict:
+    def fake_run_one(arm: str, q: dict, rep: int, spec: str, web: bool = True) -> dict:
         calls.append(q["id"])
         path = run.transcript(arm, q["id"], rep)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -760,7 +790,7 @@ def test_spend_gate_stops_the_sweep_before_a_run(tmp_path: Path, monkeypatch) ->
     no later run starts. Unset, nothing changes."""
     calls: list[str] = []
 
-    def fake_run_one(arm: str, q: dict, rep: int, spec: str) -> dict:
+    def fake_run_one(arm: str, q: dict, rep: int, spec: str, web: bool = True) -> dict:
         calls.append(q["id"])
         path = run.transcript(arm, q["id"], rep)
         path.parent.mkdir(parents=True, exist_ok=True)

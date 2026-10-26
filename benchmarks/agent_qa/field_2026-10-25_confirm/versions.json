@@ -1,0 +1,27 @@
+{
+  "arms": [
+    "alt",
+    "mcp"
+  ],
+  "model": "claude-sonnet-5-5",
+  "alt": {
+    "piqtree": "0.8.3",
+    "cogent3": "2026.7.30a0",
+    "numpy": "2.4.6"
+  },
+  "server_spec": "git+https://github.com/musharna/phylokit-mcp@dfcaed8affbdbc767bdfb0b7c283ba550be953c8",
+  "mcp": {
+    "piqtree": "0.8.3",
+    "cogent3": "2026.7.30a0",
+    "numpy": "2.4.6",
+    "phylokit-mcp": "0.7.0",
+    "commit": "dfcaed8affbdbc767bdfb0b7c283ba550be953c8"
+  },
+  "mafft": "v7.526 (2024/Apr/26)",
+  "claude_code": "2.1.310 (Claude Code)",
+  "started": "2026-10-25T21:13:57-0400",
+  "model_served": [
+    "claude-sonnet-5-5"
+  ],
+  "usage_gate": []
+}

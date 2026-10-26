@@ -28,6 +28,22 @@ Rules by category, and why each is as strict as it is:
   data (pairwise or tip-to-tip on the ML tree) differs from the generating
   value by sampling error; exact equality would score correct work as wrong.
 
+Field families (``field_2026-10-24/``, PREREG_2026-10-24_field-families.md):
+
+- ``lba_sister``: as ``sister_taxon`` (draws were kept only where the ML tree
+  under the generating model, and under ModelFinder's BIC pick, has the
+  cherry and the JC tree does not).
+- ``supported_clades``: the reply is a Newick tree holding exactly the clades
+  reported; its non-trivial splits are scored against the generating tree's.
+  Right iff precision >= ``precision_min`` and recall >= ``recall_min`` (the
+  reference pipeline's minus 3 binomial SE, fixed at build time). A tree that
+  does not hold exactly the alignment's taxa is wrong. Nothing reported has
+  precision 1 and recall 0.
+- ``align_tree_homology``: ``<residue> | <Newick>``. Right iff the residue
+  equals the true alignment's, exactly, AND the tree's normalised RF to the
+  generating tree is <= ``nrf_max`` (the reference's mean nRF + max(3 sd,
+  one split), 2/(2n-6)). Each part's result is in ``detail``.
+
 A wrong answer that is still a legitimate option (a taxon in the alignment,
 one of the four candidate models) is also flagged ``wrong_id``: a well-formed
 choice that is not the answer, as opposed to something malformed. The flag
@@ -38,6 +54,8 @@ from __future__ import annotations
 
 import re
 from typing import Any
+
+import truth as T
 
 _ANSWER_RE = re.compile(r"^[\s>*_`#-]*answer[*_`]*\s*:\s*(.*?)\s*$", re.IGNORECASE)
 _UNKNOWN = {"UNKNOWN", "UNKNOWN.", "N/A", "NONE"}
@@ -100,6 +118,66 @@ def model_of(value: str, aliases: dict[str, list[str]]) -> str | None:
     return None
 
 
+# Float slack on a band's edge: a tolerance that is exactly an achievable
+# k / m (P3, when all 20 reference runs agree) must admit k / m, whatever the
+# last bit of a mean of 20 equal floats came out as.
+_EPS = 1e-9
+
+
+def tree_splits(value: str, taxa: list[str]) -> set[T.Split] | None:
+    """The non-trivial splits of the Newick tree in ``value`` (from its first
+    "(" to its last ";"), or None if there is no tree, it does not parse, or
+    its tips are not exactly ``taxa``."""
+    start = value.find("(")
+    if start < 0:
+        return None
+    end = value.rfind(";")
+    text = value[start : end + 1] if end > start else value[start:] + ";"
+    try:
+        adj = T.parse_newick(text)
+    except (ValueError, IndexError, KeyError):
+        return None
+    if T.tips(adj) != sorted(taxa):
+        return None
+    return T.splits(adj)
+
+
+def _supported_clades(truth: dict[str, Any], value: str) -> tuple[bool, dict[str, Any]]:
+    got = tree_splits(value, truth["taxa"])
+    if got is None:
+        return False, {"parsed": False}
+    true = T.splits(T.parse_newick(truth["newick"]))
+    hits = len(got & true)
+    precision = hits / len(got) if got else 1.0
+    recall = hits / len(true)
+    right = (
+        precision >= truth["precision_min"] - _EPS
+        and recall >= truth["recall_min"] - _EPS
+    )
+    return right, {"parsed": True, "n_reported": len(got),
+                   "precision": round(precision, 4), "recall": round(recall, 4)}  # fmt: skip
+
+
+def _align_tree_homology(
+    truth: dict[str, Any], value: str
+) -> tuple[bool, dict[str, Any]]:
+    if "|" not in value:
+        return False, {"parsed": False}
+    left, rest = value.split("|", 1)
+    if "(" in left and "(" not in rest:  # tree first, residue second
+        left, rest = rest, left
+    pos_ok = _integer(left) == truth["position"]
+    got = tree_splits(rest, truth["taxa"])
+    if got is None:
+        return False, {"parsed": False, "position_right": pos_ok}
+    n = len(truth["taxa"])
+    true = T.splits(T.parse_newick(truth["newick"]))
+    nrf = T.robinson_foulds(got, true) / (2 * (n - 3))
+    tree_ok = nrf <= truth["nrf_max"] + _EPS
+    return pos_ok and tree_ok, {"parsed": True, "position_right": pos_ok,
+                                "nrf": round(nrf, 4), "tree_right": tree_ok}  # fmt: skip
+
+
 def score(
     question: dict[str, Any],
     reply: str,
@@ -112,7 +190,8 @@ def score(
     truth = question["truth"]
     category = question["category"]
     wrong_id = False
-    if category == "sister_taxon":
+    detail: dict[str, Any] | None = None
+    if category in ("sister_taxon", "lba_sister"):
         got = _taxon(value, truth["taxa"])
         right = got == truth["taxon"].upper()
         wrong_id = not right and got is not None
@@ -129,10 +208,17 @@ def score(
     elif category == "pairwise_distance":
         x = _number(value)
         right = x is not None and abs(x - truth["distance"]) <= truth["tolerance"]
+    elif category == "supported_clades":
+        right, detail = _supported_clades(truth, value)
+    elif category == "align_tree_homology":
+        right, detail = _align_tree_homology(truth, value)
     else:
         raise ValueError(f"unknown category {category!r}")
-    return {
+    out: dict[str, Any] = {
         "verdict": "right" if right else "wrong",
         "value": value,
         "wrong_id": wrong_id,
     }
+    if detail is not None:
+        out["detail"] = detail
+    return out

@@ -62,6 +62,12 @@ def key_value(q: dict[str, Any]) -> str:
         return t["model"]
     if cat == "pairwise_distance":
         return f"{t['distance']:.4f}"
+    if cat == "lba_sister":
+        return t["taxon"]
+    if cat == "supported_clades":
+        return t["newick"]
+    if cat == "align_tree_homology":
+        return f"{t['position']} | {t['newick']}"
     raise ValueError(f"unknown category {cat!r}")
 
 
@@ -80,7 +86,37 @@ def wrong_value(q: dict[str, Any]) -> str:
         return MODELS[(MODELS.index(t["model"]) + 1) % len(MODELS)]
     if cat == "pairwise_distance":
         return f"{t['distance'] + 2 * t['tolerance'] + 0.05:.4f}"
+    if cat == "lba_sister":
+        return next(x for x in sorted(t["taxa"]) if x != t["taxon"])
+    if cat == "supported_clades":
+        return "(" + ",".join(t["taxa"]) + ");"  # the star tree: recall 0
+    if cat == "align_tree_homology":
+        return f"{t['position'] + 1} | {t['newick']}"
     raise ValueError(f"unknown category {cat!r}")
+
+
+# --- field families (field_2026-10-24) -----------------------------------------
+# Their reference pipeline and shortcuts need IQ-TREE and MAFFT, so
+# build_field.py runs them once and stores each one's reply in the question's
+# ``check``; here those stored replies go through the real scorer.
+
+
+def field_controls(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per (control, question) for the field families: the reference
+    pipeline at a second seed (positive control) and each named shortcut."""
+    rows = []
+    for q in questions:
+        chk = q["check"]
+        named = {"reference pipeline (seed 2)": chk["reference_reply"]}
+        named |= chk["shortcut_replies"]
+        for name, value in named.items():
+            got = score(q, reply(str(value)))
+            rows.append(
+                {"control": name, "category": q["category"], "qid": q["id"],
+                 "value": value, "verdict": got["verdict"],
+                 "detail": got.get("detail")}
+            )  # fmt: skip
+    return rows
 
 
 def reply(value: str) -> str:
