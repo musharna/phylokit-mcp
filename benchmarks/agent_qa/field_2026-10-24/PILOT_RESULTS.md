@@ -8,6 +8,7 @@ Number right out of 10. Headroom means alt is not right on at least 3 of 10.
 | P2 `supported_clades` | 4 (4 timeouts) | 0 (10 timeouts at 1822 s) | 4 |
 | P3 `align_tree_homology` | 5 | 4 (6 timeouts) | 6 |
 
+- **mcp 0.7.0 P3 p3q09** is right but `valid: false` in `pilot_mcp/results.jsonl`, and it is counted in the 4. Its only flag was the run's own dir in Claude Code's dashed form, a false positive fixed in 6552d68.
 - **Files:** alt is `pilot_alt_sonnet.jsonl`, 0.7.0 is `pilot_mcp/`, and dfd248c is `pilot_mcp_seams/`.
 - **Why the dfd248c column is exploratory:** the server was revised after the 0.7.0 arm showed what these questions need (PREREG amendment, 2026-10-25). It is not a held-out result.
 - **dfd248c run:**
