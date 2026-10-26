@@ -31,30 +31,6 @@ one that does (`E,F,G`). Both runs return a fully resolved Newick string of the
 same shape. Only the support values tell them apart, and the false clade is the
 _lowest-supported_ one in the tree.
 
-## Does it help?
-
-Not yet. In our benchmark Claude was no more accurate with this server than
-with a Python shell, and the server cost more. Taking files by path closed most
-of the cost gap, but not all of it.
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/musharna/phylokit-mcp/main/benchmarks/agent_qa/agent_qa.png" alt="Bar chart of 114 answers per setup (38 questions, 3 runs each). Claude alone: 114 declined. Read only: 76 right, 24 wrong, 12 declined, 2 invalid. Python, MAFFT and web: 113 right, 1 invalid. phylokit-mcp: 110 right, 4 wrong." width="780">
-</p>
-
-Claude Opus 5.5 answered 38 questions 3 times each. Counting answers, as the
-chart does, the server got 110 of 114 right and a Python shell with piqtree and
-MAFFT got 113; counting questions, 36 of 38 were right in every run against 37
-(sign test p = 1). Per question the server took 6.0 times as long (95% CI 4.4
-to 8.3) and cost 14.4 times as much (9.9 to 20.2), each a geometric mean of
-per-question ratios. Most of that cost was the model pasting the data file
-into tool calls. In a pre-registered re-run of an unreleased commit that takes
-file paths (2026-10-18), the server cost 1.26 times as much (1.04 to 1.55) and
-got 36 of 38 questions right in every run against Python's 35: a tie, not a
-win.
-
-The benchmark does not score support values; method, controls and other
-limitations are in [benchmarks/agent_qa](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md).
-
 ## What it reports that a Newick string cannot
 
 - **Conflicting clades**: groupings the data support at ≥0.70 that are _absent_
@@ -115,6 +91,36 @@ wheel. `align_sequences` also needs the
 
 If `uvx` picks a Python older than 3.12, use
 `"args": ["--python", "3.12", "phylokit-mcp"]`.
+
+## What the benchmark shows
+
+Claude with the server was compared with Claude writing Python in an environment we set up with
+piqtree, cogent3 and MAFFT, on 38 phylogenetics questions, 3 runs each. A tie
+means the server matches that result without you building the environment.
+Questions right in every run, server against Python: Claude Haiku 5.5 34 against
+37, Sonnet 5.5 37 against 35, Opus 5.5 36 against 35 (on the commit that takes
+file paths). None is separated (pre-registered; Holm-adjusted McNemar p = 0.75 on
+both Haiku and Sonnet). The server cost about the same as Python on Haiku and
+more on Sonnet (1.23×) and Opus (1.26×).
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/musharna/phylokit-mcp/main/benchmarks/agent_qa/agent_qa.png" alt="Bar chart of 114 answers per setup (38 questions, 3 runs each). Claude alone: 114 declined. Read only: 76 right, 24 wrong, 12 declined, 2 invalid. Python, MAFFT and web: 113 right, 1 invalid. phylokit-mcp: 110 right, 4 wrong." width="780">
+</p>
+
+The chart is the first Opus 5.5 run, on a release that took the data as text.
+Counting answers, the server got 110 of 114 right and Python 113; counting
+questions, 36 of 38 were right in every run against 37 (sign test p = 1). Per
+question the server took 6.0 times as long (95% CI 4.4 to 8.3) and cost 14.4
+times as much (9.9 to 20.2), each a geometric mean of per-question ratios. Most
+of that cost was the model pasting the data file into tool calls; taking file
+paths (pre-registered re-run, 2026-10-18) brought it down to 1.26 times (1.04 to
+1.55).
+
+We wrote the questions and ran the benchmark ourselves; an outside re-run is
+welcome. The benchmark does not score support values; method, controls and other
+limitations are in [benchmarks/agent_qa](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md);
+the Haiku and Sonnet runs:
+[2026-10-20 re-run](https://github.com/musharna/phylokit-mcp/blob/main/benchmarks/agent_qa/README.md#haiku-and-sonnet-re-run-2026-10-20).
 
 ## Reproducibility
 
