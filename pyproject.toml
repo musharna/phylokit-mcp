@@ -106,5 +106,11 @@ module = ["cogent3.*"]
 ignore_missing_imports = true
 
 [tool.mutmut]
+# Under the default "fork", mutmut runs the stats and clean passes in its own
+# process, so IQ-TREE has run there before every per-mutant fork, and a child
+# that calls IQ-TREE again hangs until the time limit: 8 of ufboot_tree's
+# first 19 mutants read "timeout" (6 of them survivors), 185 in the 2026-10-30
+# nightly. The fork server never runs tests itself: 0 of 19.
+process_isolation = "forkserver"
 source_paths = ["src"]
 also_copy = [".editorconfig", ".github", ".gitignore", ".mcp.json", ".pre-commit-config.yaml", ".zenodo.json", "CHANGELOG.md", "CITATION.cff", "CLAUDE.md", "CONTRIBUTING.md", "LESSONS.md", "LICENSE", "NOTICE", "README.md", "SECURITY.md", "assets", "benchmarks", "docs", "glama.json", "scripts", "server.json"]
