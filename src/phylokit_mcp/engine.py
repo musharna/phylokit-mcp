@@ -100,39 +100,37 @@ IN_PROCESS_DRIFT = SUPPORT_DRIFT
 # cause. Two calls differ with sd about 0.035, which puts 0.15 about four sd out.
 UFBOOT_SUPPORT_DRIFT = 0.15
 
-_RESAMPLING = {
+# The claim per support method: (drift, what the seed does and does not fix).
+_CLAIMS = {
     "bootstrap": (
-        "That is a replicate flipping, smaller than the bootstrap's own "
-        "sampling error. The seed does fix the column resampling exactly."
+        SUPPORT_DRIFT,
+        (
+            "That is a replicate flipping, smaller than the bootstrap's own "
+            "sampling error. The seed does fix the column resampling exactly."
+        ),
     ),
     "ufboot": (
-        "IQ-TREE draws the UFBoot2 replicates inside its search, so the seed "
-        "does not pin the support either. A clade near the 0.95 line can be "
-        "called supported on one call and not on the next."
+        UFBOOT_SUPPORT_DRIFT,
+        (
+            "IQ-TREE draws the UFBoot2 replicates inside its search, so the "
+            "seed does not pin the support either. A clade near the 0.95 line "
+            "can be called supported on one call and not on the next."
+        ),
     ),
 }
-
-
-def support_drift(support_method: str) -> float:
-    """The support drift this server claims for `support_method`."""
-    if support_method == "bootstrap":
-        return SUPPORT_DRIFT
-    if support_method == "ufboot":
-        return UFBOOT_SUPPORT_DRIFT
-    raise ValueError(f"no measured support drift for support_method {support_method!r}")
-
-
-def reproducibility_note(support_method: str) -> str:
-    drift = support_drift(support_method)
-    return (
+# Built once here, so a call pays a lookup (benchmarks/perf counts the calls).
+_NOTES = {
+    method: (
         "Not bit-exact, in any setting: IQ-TREE reads the wall clock during its "
         "search, so the same request with the same seed -- repeated in this "
         "process or sent to a fresh one -- can return branch lengths and a "
         "log-likelihood that differ in the trailing digits, and a support value "
-        f"that differs by up to about {drift:.2f}. "
-        f"{_RESAMPLING[support_method]} Compare trees with compare_trees, and "
-        "numbers with a tolerance, never by string equality."
+        f"that differs by up to about {drift:.2f}. {seed_fixes} Compare trees "
+        "with compare_trees, and numbers with a tolerance, never by string "
+        "equality."
     )
+    for method, (drift, seed_fixes) in _CLAIMS.items()
+}
 
 
 SEED_MIN = 0
@@ -156,7 +154,11 @@ def validate_seed(seed: int) -> None:
 
 def reproducibility(support_method: str) -> dict:
     """What a repeat of this call can and cannot reproduce, for its method."""
-    drift = support_drift(support_method)
+    if support_method not in _CLAIMS:
+        raise ValueError(
+            f"no measured support drift for support_method {support_method!r}"
+        )
+    drift = _CLAIMS[support_method][0]
     return {
         "deterministic_across_processes": False,
         "bit_exact_on_repeat_within_process": False,
@@ -164,5 +166,5 @@ def reproducibility(support_method: str) -> dict:
         "max_support_drift_across_processes": drift,
         "bootstrap_resampling_exact": support_method == "bootstrap",
         "threads_pinned": threads_pinned(),
-        "note": reproducibility_note(support_method),
+        "note": _NOTES[support_method],
     }
