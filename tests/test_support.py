@@ -9,6 +9,7 @@ unconditionally, which is the mutant these tests exist to kill.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 
@@ -25,7 +26,7 @@ from phylokit_mcp.bootstrap import (
     support_by_split,
     validate_replicates,
 )
-from phylokit_mcp.engine import IN_PROCESS_DRIFT
+from phylokit_mcp.engine import IN_PROCESS_DRIFT, UFBOOT_SUPPORT_DRIFT, reproducibility
 from phylokit_mcp.newick import parse_newick
 from phylokit_mcp.server import compare_trees, infer_tree
 from phylokit_mcp.splits import canonical_splits, format_split, splits_to_newick
@@ -139,7 +140,8 @@ def test_repeated_calls_agree_to_within_the_measured_engine_drift(fasta_hard):
 
 # One fresh interpreter, one MCP session, one infer_tree call. Reports what a
 # caller would compare: branch lengths (in the newick), the log-likelihood, the
-# support values, and what the server claims about reproducibility.
+# support values, and what the server claims about reproducibility. argv[1] is
+# a JSON object of arguments that override the defaults below.
 _FRESH_RUN = """
 import json, sys
 import anyio
@@ -150,6 +152,7 @@ async def go():
     async with Client(build_server()) as c:
         r = await c.call_tool("infer_tree", {
             "fasta": sys.stdin.read(), "model": "JC", "replicates": 20, "seed": 7,
+            **json.loads(sys.argv[1]),
         })
         assert not r.is_error, r.content[0].text
         return r.structured_content
@@ -175,15 +178,20 @@ int gettimeofday(struct timeval *tv, void *tz) {
 """
 
 
-def _fresh_runs(n: int, fasta: str, env: dict | None = None) -> list[dict]:
+# The nonparametric default above, and UFBoot2 at its floor.
+_UFBOOT = {"support_method": "ufboot", "replicates": UFBOOT_MIN_REPLICATES}
+
+
+def _fresh_runs(
+    n: int, fasta: str, env: dict | None = None, args: dict | None = None
+) -> list[dict]:
     """`n` fresh server processes, at most 3 at a time."""
-    import json
     import os
     from concurrent.futures import ThreadPoolExecutor
 
     def one(_):
         proc = subprocess.run(
-            [sys.executable, "-c", _FRESH_RUN],
+            [sys.executable, "-c", _FRESH_RUN, json.dumps(args or {})],
             input=fasta,
             capture_output=True,
             text=True,
@@ -202,13 +210,17 @@ def _numbers(run: dict) -> tuple:
     return (run["newick"], run["lnL"], tuple(map(tuple, run["support"])))
 
 
-def test_with_the_clock_frozen_fresh_processes_are_bit_identical(fasta_hard, tmp_path):
-    """The positive control for the test below, and the proof of the cause.
+@pytest.mark.parametrize("args", [{}, _UFBOOT], ids=["bootstrap", "ufboot"])
+def test_with_the_clock_frozen_fresh_processes_are_bit_identical(
+    fasta_hard, tmp_path, args
+):
+    """The positive control for the tests below, and the proof of the cause.
 
     If the comparison could not see equality, "the runs differ" would be a
     property of the harness. Here the same harness, with only the wall clock
     taken away from IQ-TREE, gets byte-identical branch lengths, likelihood and
-    support from every fresh process.
+    support from every fresh process. For UFBoot2 too: its support moves three
+    times as far as the bootstrap's, and the clock is still the whole cause.
     """
     import shutil
 
@@ -220,7 +232,7 @@ def test_with_the_clock_frozen_fresh_processes_are_bit_identical(fasta_hard, tmp
     src.write_text(_FROZEN_CLOCK_C)
     subprocess.run([cc, "-shared", "-fPIC", "-o", str(lib), str(src)], check=True)
 
-    runs = _fresh_runs(4, fasta_hard, env={"LD_PRELOAD": str(lib)})
+    runs = _fresh_runs(4, fasta_hard, env={"LD_PRELOAD": str(lib)}, args=args)
     assert len({_numbers(r) for r in runs}) == 1, [r["lnL"] for r in runs]
 
 
@@ -263,6 +275,49 @@ def test_fresh_processes_are_not_bit_exact_and_the_server_says_so(fasta_hard):
         assert [c for c, _ in r["support"]] == [c for c, _ in first["support"]]
         for (_, x), (_, y) in zip(r["support"], first["support"], strict=True):
             assert abs(x - y) <= first["claim"]["max_support_drift_across_processes"]
+
+
+def test_ufboot_support_moves_within_the_drift_the_server_claims_for_ufboot(fasta_hard):
+    """The claim is per support method, and UFBoot2's covers what UFBoot2 does.
+
+    The server reported the nonparametric bootstrap's 0.05 drift, and "the seed
+    fixes the column resampling exactly", on UFBoot2 calls too. Neither holds:
+    IQ-TREE draws the UFBoot2 replicates inside its clock-dependent search.
+    Measured on this fixture (seed 7, 1000 replicates), 48 fresh processes
+    put the weakest clade anywhere from 0.22 to 0.34. Six of those runs drawn
+    at random spread 0.067 on average and past 0.05 in 79% of draws (never
+    past 0.15), so the old bound fails most runs of this test, and the old
+    resampling claim fails every run. Every pair is compared, not each run
+    against the first.
+    """
+    runs = _fresh_runs(6, fasta_hard, args=_UFBOOT)
+    for r in runs:
+        claim = r["claim"]
+        assert claim["bootstrap_resampling_exact"] is False, (
+            f"UFBoot2 draws its replicates inside IQ-TREE's search; it said {claim}"
+        )
+        assert claim["max_support_drift_across_processes"] == UFBOOT_SUPPORT_DRIFT
+        assert "does not pin the support" in claim["note"]
+    # The clade list is identical: the comparison can see agreement.
+    assert len({tuple(c for c, _ in r["support"]) for r in runs}) == 1
+    by_clade: dict[str, list[float]] = {}
+    for r in runs:
+        for clade, support in r["support"]:
+            by_clade.setdefault(clade, []).append(support)
+    spread = {c: round(max(v) - min(v), 4) for c, v in by_clade.items()}
+    assert max(spread.values()) <= UFBOOT_SUPPORT_DRIFT, spread
+
+
+def test_the_drift_claim_is_per_method_and_refuses_one_it_never_measured():
+    """The bootstrap keeps its own claim; a method with no measurement has none."""
+    boot, ufb = reproducibility("bootstrap"), reproducibility("ufboot")
+    assert boot["max_support_drift_across_processes"] == IN_PROCESS_DRIFT
+    assert boot["bootstrap_resampling_exact"] is True
+    assert "column resampling exactly" in boot["note"]
+    assert ufb["max_support_drift_within_process"] == UFBOOT_SUPPORT_DRIFT
+    assert f"{UFBOOT_SUPPORT_DRIFT:.2f}" in ufb["note"]
+    with pytest.raises(ValueError, match="no measured support drift for .*'alrt'"):
+        reproducibility("alrt")
 
 
 def test_a_different_seed_changes_support_but_not_wildly(fasta_hard):

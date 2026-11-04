@@ -6,6 +6,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- `infer_tree(support_method="ufboot")` reported the nonparametric bootstrap's
+  reproducibility claim: support drift up to 0.05, and a seed that fixes the
+  resampling exactly. UFBoot2 support moves further, because IQ-TREE draws its
+  replicates inside the clock-dependent search: on the test fixture, 48 fresh
+  processes at one seed put one clade anywhere from 0.22 to 0.34. The claim is
+  now per method: UFBoot2 reports `max_support_drift_*` 0.15 and
+  `bootstrap_resampling_exact: false`, and its note says a clade near 0.95 can
+  be called supported on one call and not the next. Freezing the clock makes
+  UFBoot2 bit-identical too, so the clock is still the whole cause.
+
 ### Added
 
 - **Field families for the agent benchmark** (`benchmarks/agent_qa/field_2026-10-24/`,
