@@ -53,8 +53,8 @@ def test_the_defaults_are_seed_1_dna_and_the_floor_and_refuse_below_it(hard):
         hard, "JC", replicates=UFBOOT_MIN_REPLICATES, seed=1, moltype="dna"
     )
     # Same clades. Not the same values: IQ-TREE is not bit-exact at one seed
-    # (engine.REPRODUCIBILITY_NOTE), and on this fixture one clade moved 0.07
-    # between two seed-1 runs (C|D|G 0.30, 0.23 on 2026-11-03), past SUPPORT_DRIFT.
+    # (engine.reproducibility("ufboot")), and on this fixture one clade moved 0.07
+    # between two seed-1 runs (C|D|G 0.30, 0.23 on 2026-11-03).
     assert dict(_supports(result)).keys() == dict(_supports(explicit)).keys()
     # The "bootstrap" range (20-1000) would accept 100 and hand IQ-TREE a count
     # it refuses; the refusal must name the ufboot floor.

@@ -88,16 +88,50 @@ SUPPORT_DRIFT = 0.05
 # bound is unchanged; it is now known to apply across processes too.
 IN_PROCESS_DRIFT = SUPPORT_DRIFT
 
-REPRODUCIBILITY_NOTE = (
-    "Not bit-exact, in any setting: IQ-TREE reads the wall clock during its "
-    "search, so the same request with the same seed -- repeated in this process "
-    "or sent to a fresh one -- can return branch lengths and a log-likelihood "
-    "that differ in the trailing digits, and a support value that differs by up "
-    f"to about {SUPPORT_DRIFT:.2f} (a bootstrap replicate flipping). That is "
-    "smaller than the bootstrap's own sampling error. The seed does fix the "
-    "column resampling exactly. Compare trees with compare_trees, and numbers "
-    "with a tolerance, never by string equality."
-)
+# UFBoot2 support moves much more, and not by a replicate flipping. IQ-TREE
+# draws the replicates itself and scores them on the trees its clock-dependent
+# search happens to visit, so the support is a different estimate on every run.
+# The 0.05 above was measured on the nonparametric bootstrap and was reported
+# for UFBoot calls too. Measured on the 60-site test fixture, seed 7, 1000
+# replicates: 48 fresh processes gave one clade list and 48 distinct results;
+# the weakest clade ranged 0.22 to 0.34 (sd 0.025 per run), the others 0.08,
+# 0.04 and 0.02; 12 repeats in one process ranged 0.07. With the clock frozen
+# (the gettimeofday shim) every run was identical, so the clock is the whole
+# cause. Two calls differ with sd about 0.035, which puts 0.15 about four sd out.
+UFBOOT_SUPPORT_DRIFT = 0.15
+
+# The claim per support method: (drift, what the seed does and does not fix).
+_CLAIMS = {
+    "bootstrap": (
+        SUPPORT_DRIFT,
+        (
+            "That is a replicate flipping, smaller than the bootstrap's own "
+            "sampling error. The seed does fix the column resampling exactly."
+        ),
+    ),
+    "ufboot": (
+        UFBOOT_SUPPORT_DRIFT,
+        (
+            "IQ-TREE draws the UFBoot2 replicates inside its search, so the "
+            "seed does not pin the support either. A clade near the 0.95 line "
+            "can be called supported on one call and not on the next."
+        ),
+    ),
+}
+# Built once here, so a call pays a lookup (benchmarks/perf counts the calls).
+_NOTES = {
+    method: (
+        "Not bit-exact, in any setting: IQ-TREE reads the wall clock during its "
+        "search, so the same request with the same seed -- repeated in this "
+        "process or sent to a fresh one -- can return branch lengths and a "
+        "log-likelihood that differ in the trailing digits, and a support value "
+        f"that differs by up to about {drift:.2f}. {seed_fixes} Compare trees "
+        "with compare_trees, and numbers with a tolerance, never by string "
+        "equality."
+    )
+    for method, (drift, seed_fixes) in _CLAIMS.items()
+}
+
 
 SEED_MIN = 0
 # IQ-TREE takes the seed as a C int; numpy's generator needs it non-negative.
@@ -118,13 +152,19 @@ def validate_seed(seed: int) -> None:
         )
 
 
-def reproducibility() -> dict:
+def reproducibility(support_method: str) -> dict:
+    """What a repeat of this call can and cannot reproduce, for its method."""
+    if support_method not in _CLAIMS:
+        raise ValueError(
+            f"no measured support drift for support_method {support_method!r}"
+        )
+    drift = _CLAIMS[support_method][0]
     return {
         "deterministic_across_processes": False,
         "bit_exact_on_repeat_within_process": False,
-        "max_support_drift_within_process": SUPPORT_DRIFT,
-        "max_support_drift_across_processes": SUPPORT_DRIFT,
-        "bootstrap_resampling_exact": True,
+        "max_support_drift_within_process": drift,
+        "max_support_drift_across_processes": drift,
+        "bootstrap_resampling_exact": support_method == "bootstrap",
         "threads_pinned": threads_pinned(),
-        "note": REPRODUCIBILITY_NOTE,
+        "note": _NOTES[support_method],
     }

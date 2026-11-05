@@ -345,8 +345,9 @@ def infer_tree(
         replicates: Bootstrap replicates. Nonparametric: 20-1000, default 100,
             and each one costs a full ML search, so the call takes about
             replicates x one search. UFBoot2: 1000-10000, default 1000.
-        seed: 0 to 2**31-1. Fixes the column resampling exactly; the engine's
-            search is seeded too but is not bit-exact (see `reproducibility`).
+        seed: 0 to 2**31-1. Fixes the nonparametric bootstrap's column
+            resampling exactly; the engine's search, and with it UFBoot2's
+            support, is seeded too but is not bit-exact (see `reproducibility`).
         sequence_type: "dna" (default) or "protein". DECLARED, never sniffed: an
             alignment of only A/C/G/T is a valid protein alignment too, so
             guessing would silently fit a nucleotide model to protein data. A
@@ -400,7 +401,7 @@ def infer_tree(
         log_likelihood=tree_log_likelihood(tree),
         alignment=stats.__dict__,  # type: ignore[typeddict-item]
         support=support.as_dict(),  # type: ignore[typeddict-item]
-        reproducibility=engine.reproducibility(),
+        reproducibility=engine.reproducibility(support_method),
         engine={
             "name": "IQ-TREE 3 via piqtree",
             "version": engine.engine_version(),

@@ -126,8 +126,11 @@ the Haiku and Sonnet runs:
 
 Not bit-exact, in any setting: IQ-TREE reads the wall clock during its search,
 so the same request and seed can differ in the trailing digits of branch
-lengths and log-likelihood, and a support value can move by a replicate
-flipping. The server reports `deterministic_across_processes: false`. Compare
+lengths and log-likelihood, and a support value can move: by about 0.05 (a
+replicate flipping) for the nonparametric bootstrap, and by up to about 0.15
+for UFBoot2, whose replicates IQ-TREE draws inside the search. The server
+reports `deterministic_across_processes: false` and the drift for the method
+used. Compare
 trees with `compare_trees` and numbers with a tolerance, never by string
 equality. Measurements: [docs/REPRODUCIBILITY.md](https://github.com/musharna/phylokit-mcp/blob/main/docs/REPRODUCIBILITY.md).
 
