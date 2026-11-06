@@ -85,6 +85,19 @@ def test_the_query_must_name_one_place_and_its_row():
     assert str(exc.value) == "position needs sequence: the row the residue is in."
 
 
+def test_a_position_must_be_one_of_the_rows_own_residues():
+    # b has 18 residues in 20 columns; its last residue, T, is in column 20.
+    assert map_column(ALN, "b", 1, None)["column"] == 1
+    assert map_column(ALN, "b", 18, None)["column"] == 20
+    for bad in (0, 19, "3"):
+        with pytest.raises(AlignmentError) as exc:
+            map_column(ALN, "b", bad, None)
+        assert str(exc.value) == (
+            "position must be 1-18: 'b' has 18 residues (gaps not counted); "
+            f"got {bad!r}."
+        )
+
+
 def _named(n: int) -> dict[str, str]:
     return {f"s{i:02d}": "AC" for i in range(n)}
 
