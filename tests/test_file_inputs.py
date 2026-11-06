@@ -75,8 +75,12 @@ def test_two_trees_splits_on_semicolons_not_whitespace(tmp_path):
     path = tmp_path / "trees.nwk"
     path.write_text(f"{TRUE_NEWICK}{TRUE_NEWICK}")
     assert compare_trees(trees_path=str(path))["robinson_foulds"] == 0
-    with pytest.raises(ValueError, match="found 3"):
+    with pytest.raises(ValueError) as exc:
         _two_trees("(a,b,c);(a,c,b);(b,c,a);")
+    assert str(exc.value) == (
+        "trees_path must hold exactly two Newick trees (each ending in ';'), "
+        "tree A then tree B; found 3."
+    )
 
 
 def test_exactly_one_of_text_and_path(tmp_path):

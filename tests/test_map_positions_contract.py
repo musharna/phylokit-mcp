@@ -77,11 +77,12 @@ def test_characters_are_checked_for_the_declared_sequence_type():
     protein = ">a\nMEFIL\n>b\nMQFIL\n"
     r = map_positions(aligned=True, column=2, fasta=protein, sequence_type="protein")
     assert r["rows"]["b"]["residue"] == "Q"
-    with pytest.raises(
-        AlignmentError,
-        match=r"Unrecognised characters for dna: \['E', 'F', 'I', 'L', 'Q'\]",
-    ):
+    with pytest.raises(AlignmentError) as exc:
         map_positions(aligned=True, column=2, fasta=protein)
+    # 'M' is not listed: it is the IUPAC code for A or C.
+    assert (
+        str(exc.value) == "Unrecognised characters for dna: ['E', 'F', 'I', 'L', 'Q']."
+    )
 
 
 def test_a_dot_gets_the_padding_question_not_a_character_refusal():
