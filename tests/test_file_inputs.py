@@ -21,6 +21,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from phylokit_mcp import inputs
 from phylokit_mcp.inputs import InputFileError, read_path, text_or_path
 from phylokit_mcp.server import (
+    _two_trees,
     align_sequences,
     build_server,
     compare_trees,
@@ -63,6 +64,19 @@ def test_trees_path_reads_tree_a_then_tree_b(tmp_path):
         compare_trees(trees_path=str(path))
     with pytest.raises(ValueError, match="not both"):
         compare_trees(newick_a=TRUE_NEWICK, trees_path=str(path))
+
+
+def test_two_trees_splits_on_semicolons_not_whitespace(tmp_path):
+    # The Newick parser ignores anything after a tree's ';', so compare_trees
+    # alone cannot see a wrong suffix; the trees are checked as returned.
+    assert _two_trees("(a,b,c);\n(a,c,b);\n") == ("(a,b,c);", "(a,c,b);")
+    assert _two_trees("(a,b,c);(a,c,b);") == ("(a,b,c);", "(a,c,b);")
+    # Two trees on one line, no space between them, is still two trees.
+    path = tmp_path / "trees.nwk"
+    path.write_text(f"{TRUE_NEWICK}{TRUE_NEWICK}")
+    assert compare_trees(trees_path=str(path))["robinson_foulds"] == 0
+    with pytest.raises(ValueError, match="found 3"):
+        _two_trees("(a,b,c);(a,c,b);(b,c,a);")
 
 
 def test_exactly_one_of_text_and_path(tmp_path):
