@@ -6,6 +6,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- `map_column` with `column=` and an unknown `sequence` listed the first 20
+  names without the ` ...` that says more exist; the `position=` path already
+  added it. One check now serves both paths.
+
 ## [0.8.1] — 2026-11-05
 
 ### Fixed

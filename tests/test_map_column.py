@@ -113,10 +113,14 @@ def test_an_unknown_row_for_a_position_lists_twenty_names_then_an_ellipsis():
     assert str(exc.value) == f"No sequence named 'zz'. Names: {twenty} ..."
 
 
-def test_a_named_row_is_checked_for_a_column_too():
+def test_a_named_row_is_checked_for_a_column_too_with_the_same_ellipsis():
     twenty = [f"s{i:02d}" for i in range(20)]
     assert map_column(_named(21), "s20", None, 2)["query"]["sequence"] == "s20"
     with pytest.raises(AlignmentError) as exc:
-        map_column(_named(21), "zz", None, 2)
-    # Unlike the position path, no ellipsis follows the twenty names here.
+        map_column(_named(20), "zz", None, 2)
     assert str(exc.value) == f"No sequence named 'zz'. Names: {twenty}"
+    # Given in reverse order, the names are still listed sorted.
+    backwards = dict(reversed(_named(21).items()))
+    with pytest.raises(AlignmentError) as exc:
+        map_column(backwards, "zz", None, 2)
+    assert str(exc.value) == f"No sequence named 'zz'. Names: {twenty} ..."
