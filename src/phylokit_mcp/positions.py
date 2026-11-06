@@ -87,14 +87,14 @@ def map_column(
             "Give exactly one of position (a residue of `sequence`) and column "
             "(an alignment column)."
         )
+    if sequence is not None and sequence not in aligned:
+        raise AlignmentError(
+            f"No sequence named {sequence!r}. Names: {sorted(aligned)[:20]}"
+            + (" ..." if len(aligned) > 20 else "")
+        )
     if position is not None:
         if sequence is None:
             raise AlignmentError("position needs sequence: the row the residue is in.")
-        if sequence not in aligned:
-            raise AlignmentError(
-                f"No sequence named {sequence!r}. Names: {sorted(aligned)[:20]}"
-                + (" ..." if len(aligned) > 20 else "")
-            )
         index = _residue_index(aligned[sequence])
         n_res = sum(p is not None for p in index)
         if not isinstance(position, int) or not 1 <= position <= n_res:
@@ -104,10 +104,6 @@ def map_column(
             )
         col = index.index(position)
     else:
-        if sequence is not None and sequence not in aligned:
-            raise AlignmentError(
-                f"No sequence named {sequence!r}. Names: {sorted(aligned)[:20]}"
-            )
         if not isinstance(column, int) or not 1 <= column <= n_columns:
             raise AlignmentError(
                 f"column must be 1-{n_columns} (the alignment has {n_columns} "
