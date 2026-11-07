@@ -97,13 +97,20 @@ IN_PROCESS_DRIFT = SUPPORT_DRIFT
 # the weakest clade ranged 0.22 to 0.34 (sd 0.025 per run), the others 0.08,
 # 0.04 and 0.02; 12 repeats in one process ranged 0.07. With the clock frozen
 # (the gettimeofday shim) every run was identical, so the clock is the whole
-# cause. Two calls differ with sd about 0.035, which puts 0.15 about four sd out.
-UFBOOT_SUPPORT_DRIFT = 0.15
+# cause.
+#
+# 0.8.1 reported a bound of 0.15, four sd out from that one host's spread. Six
+# runs on a GitHub runner (main CI, 2026-11-06, same piqtree 0.8.3) moved that
+# clade 0.16: the spread depends on the host, so a bound measured on one says
+# nothing about the next. No bound is claimed; the note gives what was seen.
+UFBOOT_SUPPORT_DRIFT = None
 
-# The claim per support method: (drift, what the seed does and does not fix).
+# The claim per support method: (drift bound or None, how far support moves,
+# what the seed does and does not fix).
 _CLAIMS = {
     "bootstrap": (
         SUPPORT_DRIFT,
+        f"a support value that differs by up to about {SUPPORT_DRIFT:.2f}.",
         (
             "That is a replicate flipping, smaller than the bootstrap's own "
             "sampling error. The seed does fix the column resampling exactly."
@@ -111,6 +118,11 @@ _CLAIMS = {
     ),
     "ufboot": (
         UFBOOT_SUPPORT_DRIFT,
+        (
+            "support values that differ by no fixed bound: on a 60-site test "
+            "alignment one clade moved 0.16 across 6 calls on one machine and "
+            "0.12 across 48 on another, so none is claimed."
+        ),
         (
             "IQ-TREE draws the UFBoot2 replicates inside its search, so the "
             "seed does not pin the support either. A clade near the 0.95 line "
@@ -124,12 +136,11 @@ _NOTES = {
         "Not bit-exact, in any setting: IQ-TREE reads the wall clock during its "
         "search, so the same request with the same seed -- repeated in this "
         "process or sent to a fresh one -- can return branch lengths and a "
-        "log-likelihood that differ in the trailing digits, and a support value "
-        f"that differs by up to about {drift:.2f}. {seed_fixes} Compare trees "
-        "with compare_trees, and numbers with a tolerance, never by string "
-        "equality."
+        f"log-likelihood that differ in the trailing digits, and {moves} "
+        f"{seed_fixes} Compare trees with compare_trees, and numbers with a "
+        "tolerance, never by string equality."
     )
-    for method, (drift, seed_fixes) in _CLAIMS.items()
+    for method, (_, moves, seed_fixes) in _CLAIMS.items()
 }
 
 
