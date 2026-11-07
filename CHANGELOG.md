@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-11-07
+
 ### Fixed
 
 - `infer_tree(support_method="ufboot")` claimed its support drifts by at most
@@ -14,6 +16,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   now reports `max_support_drift_within_process` and
   `max_support_drift_across_processes` as `null` (no bound), and its note gives
   the spreads seen instead. The nonparametric bootstrap's 0.05 is unchanged.
+  A caller that does arithmetic on those two fields must handle `null`; that
+  type change is why this is 0.9.0, not 0.8.2.
 
 - `map_column` with `column=` and an unknown `sequence` listed the first 20
   names without the ` ...` that says more exist; the `position=` path already
