@@ -26,7 +26,7 @@ from phylokit_mcp.bootstrap import (
     support_by_split,
     validate_replicates,
 )
-from phylokit_mcp.engine import IN_PROCESS_DRIFT, UFBOOT_SUPPORT_DRIFT, reproducibility
+from phylokit_mcp.engine import IN_PROCESS_DRIFT, reproducibility, threads_pinned
 from phylokit_mcp.newick import parse_newick
 from phylokit_mcp.server import compare_trees, infer_tree
 from phylokit_mcp.splits import canonical_splits, format_split, splits_to_newick
@@ -277,7 +277,7 @@ def test_fresh_processes_are_not_bit_exact_and_the_server_says_so(fasta_hard):
             assert abs(x - y) <= first["claim"]["max_support_drift_across_processes"]
 
 
-def test_ufboot_support_moves_within_the_drift_the_server_claims_for_ufboot(fasta_hard):
+def test_ufboot_support_moves_and_the_server_claims_no_bound_for_it(fasta_hard):
     """The claim is per support method, and UFBoot2's covers what UFBoot2 does.
 
     The server reported the nonparametric bootstrap's 0.05 drift, and "the seed
@@ -287,8 +287,14 @@ def test_ufboot_support_moves_within_the_drift_the_server_claims_for_ufboot(fast
     put the weakest clade anywhere from 0.22 to 0.34. Six of those runs drawn
     at random spread 0.067 on average and past 0.05 in 79% of draws (never
     past 0.15), so the old bound fails most runs of this test, and the old
-    resampling claim fails every run. Every pair is compared, not each run
-    against the first.
+    resampling claim fails every run.
+
+    0.8.1 then claimed a 0.15 bound, and six runs on a GitHub runner moved that
+    clade 0.16 (main CI, 2026-11-06): the spread depends on the host. So the
+    server claims no bound, and this test checks that the support does move
+    between processes and that the server says so. The 0.5 ceiling is a sanity
+    edge on this test, not a claim: half the scale means the runs are not
+    estimating the same clade.
     """
     runs = _fresh_runs(6, fasta_hard, args=_UFBOOT)
     for r in runs:
@@ -296,8 +302,9 @@ def test_ufboot_support_moves_within_the_drift_the_server_claims_for_ufboot(fast
         assert claim["bootstrap_resampling_exact"] is False, (
             f"UFBoot2 draws its replicates inside IQ-TREE's search; it said {claim}"
         )
-        assert claim["max_support_drift_across_processes"] == UFBOOT_SUPPORT_DRIFT
-        assert "does not pin the support" in claim["note"]
+        assert claim["max_support_drift_within_process"] is None
+        assert claim["max_support_drift_across_processes"] is None
+        assert "no fixed bound" in claim["note"]
     # The clade list is identical: the comparison can see agreement.
     assert len({tuple(c for c, _ in r["support"]) for r in runs}) == 1
     by_clade: dict[str, list[float]] = {}
@@ -305,17 +312,51 @@ def test_ufboot_support_moves_within_the_drift_the_server_claims_for_ufboot(fast
         for clade, support in r["support"]:
             by_clade.setdefault(clade, []).append(support)
     spread = {c: round(max(v) - min(v), 4) for c, v in by_clade.items()}
-    assert max(spread.values()) <= UFBOOT_SUPPORT_DRIFT, spread
+    assert max(spread.values()) > 0, f"six identical UFBoot2 results: {spread}"
+    assert max(spread.values()) < 0.5, spread
 
 
 def test_the_drift_claim_is_per_method_and_refuses_one_it_never_measured():
-    """The bootstrap keeps its own claim; a method with no measurement has none."""
-    boot, ufb = reproducibility("bootstrap"), reproducibility("ufboot")
-    assert boot["max_support_drift_across_processes"] == IN_PROCESS_DRIFT
-    assert boot["bootstrap_resampling_exact"] is True
-    assert "column resampling exactly" in boot["note"]
-    assert ufb["max_support_drift_within_process"] == UFBOOT_SUPPORT_DRIFT
-    assert f"{UFBOOT_SUPPORT_DRIFT:.2f}" in ufb["note"]
+    """The bootstrap keeps its own bound; UFBoot2 claims none; a method with no
+    measurement is refused."""
+    head = (
+        "Not bit-exact, in any setting: IQ-TREE reads the wall clock during its "
+        "search, so the same request with the same seed -- repeated in this "
+        "process or sent to a fresh one -- can return branch lengths and a "
+        "log-likelihood that differ in the trailing digits, and "
+    )
+    tail = (
+        " Compare trees with compare_trees, and numbers with a tolerance, never "
+        "by string equality."
+    )
+    assert IN_PROCESS_DRIFT == 0.05
+    assert reproducibility("bootstrap") == {
+        "deterministic_across_processes": False,
+        "bit_exact_on_repeat_within_process": False,
+        "max_support_drift_within_process": 0.05,
+        "max_support_drift_across_processes": 0.05,
+        "bootstrap_resampling_exact": True,
+        "threads_pinned": threads_pinned(),
+        "note": head
+        + "a support value that differs by up to about 0.05. That is a replicate "
+        "flipping, smaller than the bootstrap's own sampling error. The seed does "
+        "fix the column resampling exactly." + tail,
+    }
+    assert reproducibility("ufboot") == {
+        "deterministic_across_processes": False,
+        "bit_exact_on_repeat_within_process": False,
+        "max_support_drift_within_process": None,
+        "max_support_drift_across_processes": None,
+        "bootstrap_resampling_exact": False,
+        "threads_pinned": threads_pinned(),
+        "note": head
+        + "support values that differ by no fixed bound: on a 60-site test "
+        "alignment one clade moved 0.16 across 6 calls on one machine and 0.12 "
+        "across 48 on another, so none is claimed. IQ-TREE draws the UFBoot2 "
+        "replicates inside its search, so the seed does not pin the support "
+        "either. A clade near the 0.95 line can be called supported on one call "
+        "and not on the next." + tail,
+    }
     with pytest.raises(ValueError, match="no measured support drift for .*'alrt'"):
         reproducibility("alrt")
 

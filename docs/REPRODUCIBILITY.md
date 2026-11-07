@@ -18,9 +18,12 @@ Measured, not assumed:
   draws the UFBoot2 replicates inside its clock-dependent search. On the 60-site
   test fixture at one seed, 48 fresh processes gave one clade list but put the
   weakest clade anywhere from 0.22 to 0.34; 12 repeats in one process ranged
-  0.07. With the clock frozen every run was identical. The server reports 0.15
-  for `support_method="ufboot"` and `bootstrap_resampling_exact: false`. A clade
-  near the 0.95 line can be called supported on one call and not on the next.
+  0.07. With the clock frozen every run was identical. The spread depends on
+  the host: 0.8.1 reported a bound of 0.15, and six runs on a GitHub runner
+  moved the same clade 0.16. So for `support_method="ufboot"` the server
+  reports no bound (`max_support_drift_*: null`) and
+  `bootstrap_resampling_exact: false`. A clade near the 0.95 line can be called
+  supported on one call and not on the next.
 
 Compare trees with `compare_trees`, and numbers with a tolerance — never by
 string equality.
