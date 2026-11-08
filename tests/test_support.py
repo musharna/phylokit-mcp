@@ -560,7 +560,16 @@ def test_ufboot_support_reads_a_root_bifurcation_from_whichever_edge_is_labelled
     tips = set("abcdef")
     got = support_by_split(make_tree("((a,(b,c)90)80,((d,e)70,f));"), tips, 1000)
     assert got == {frozenset("bc"): 0.9, frozenset("def"): 0.8, frozenset("de"): 0.7}
-    with pytest.raises(RuntimeError, match="carry different UFBoot support"):
+    # Whole messages, not `match=`: the f-string text is never mutated by
+    # mutmut, and "clade b|c" as a regex is "clade b" OR "c".
+    with pytest.raises(RuntimeError) as two_labels:
         support_by_split(make_tree("((a,(b,c)90)80,((d,e)70,f)60);"), tips, 1000)
-    with pytest.raises(RuntimeError, match="no UFBoot support for clade b|c"):
+    assert str(two_labels.value) == (
+        "two edges of clade d|e|f carry different UFBoot support ([60.0, 80.0]); "
+        "the tree is not a consistent annotation."
+    )
+    with pytest.raises(RuntimeError) as no_label:
         support_by_split(make_tree("((a,(b,c))80,((d,e)70,f));"), tips, 1000)
+    assert str(no_label.value).startswith(
+        "IQ-TREE returned no UFBoot support for clade b|c after 1000 replicates "
+    )
