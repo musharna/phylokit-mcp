@@ -361,3 +361,88 @@ def test_out_path_writes_the_alignment_infer_tree_reads_by_path(fasta_easy, tmp_
     inline = align_sequences(_fasta(ragged))
     assert inline["written_to"] is None
     assert parse_fasta(inline["fasta"]) == rows
+
+
+def test_each_refusal_before_mafft_names_exactly_what_to_fix():
+    """The whole message, not a fragment of it: the callers matched on a
+    substring, so 30 rewordings of these refusals survived mutation, among
+    them a protein hint shown for protein and a ninth character listed."""
+    from phylokit_mcp.msa import validate_unaligned
+
+    def refusal(*args):
+        with pytest.raises(AlignmentError) as exc:
+            validate_unaligned(*args)
+        return str(exc.value)
+
+    ok = {"a": "ACGTACGT", "b": "ACGTTACGT"}
+    # The declaration defaults to DNA, and the same pair passes as protein.
+    assert validate_unaligned(ok) is None
+    assert validate_unaligned(ok, "protein") is None
+
+    # Unreachable from the tools, which check sequence_type first; msa.align
+    # is called directly too, so the guard is its own.
+    assert refusal(ok, "rna") == (
+        "Unknown sequence_type 'rna'. Valid: ['dna', 'protein']."
+    )
+    assert refusal({"a,b": "ACGT", "c": "ACGA"}) == (
+        "Sequence name 'a,b' contains characters that are unsafe in Newick "
+        "(the tree format uses ,:;() as syntax). Use letters, digits, "
+        "underscore, dot or hyphen."
+    )
+    assert refusal({"a": "ACGT", "b": ""}) == "Sequence 'b' is empty."
+    assert refusal({"a": "AC-GT", "b": "ACGA?"}) == (
+        "Input contains gap or missing-data characters ['-', '?']. "
+        "align_sequences takes UNALIGNED sequences; remove the gaps first. "
+        "If the sequences are already aligned, pass them to infer_tree as "
+        "they are."
+    )
+    # Ten letters DNA rejects, so the list is cut at its eighth; under DNA the
+    # protein remedy is named.
+    assert len(msa.unrecognised_characters(set("EFIJLOPQXZ"), "dna")) == 10
+    assert refusal({"a": "EFIJLOPQXZ", "b": "ACGT"}) == (
+        "Unrecognised characters for dna: ['E', 'F', 'I', 'J', 'L', 'O', 'P', "
+        "'Q']. If these are protein sequences, pass sequence_type='protein': "
+        "the molecule type is declared, never guessed."
+    )
+    # Under protein that remedy would be wrong, so nothing follows the list.
+    assert refusal({"a": "MKV1", "b": "MKVL"}, "protein") == (
+        "Unrecognised characters for protein: ['1']."
+    )
+
+
+def test_the_refusals_built_only_from_f_strings_are_asserted_whole_too():
+    """mutmut 3.8.1 leaves f-string text alone, so no survivor list can show
+    these messages drifting; each is checked here, with its cap's edge."""
+    from phylokit_mcp.msa import validate_unaligned
+
+    def refusal(seqs, moltype="dna"):
+        with pytest.raises(AlignmentError) as exc:
+            validate_unaligned(seqs, moltype)
+        return str(exc.value)
+
+    assert refusal({"a": "ACGT"}) == "Need at least 2 sequences to align, got 1."
+    assert validate_unaligned({"a": "ACGT", "b": "ACGA"}) is None
+
+    at_cap = {f"s{i}": "ACGT" for i in range(200)}
+    assert validate_unaligned(at_cap) is None
+    assert refusal({**at_cap, "s200": "ACGT"}) == (
+        "Got 201 sequences; this server caps at 200."
+    )
+    assert validate_unaligned({"a": "A" * 100_000, "b": "ACGT"}) is None
+    assert refusal({"a": "A" * 100_001, "b": "ACGT"}) == (
+        "Sequence 'a' is 100001 residues; this server caps at 100000."
+    )
+
+    stop = (
+        " '*' is a stop codon, and the engine has no state for it: trim stops "
+        "(or replace them with X) before aligning or inferring."
+    )
+    assert refusal({"a": "MKV*", "b": "MKVL"}, "protein") == (
+        "Unrecognised characters for protein: ['*']." + stop
+    )
+    # Under DNA the stop-codon remedy follows the protein one.
+    assert refusal({"a": "ACG*", "b": "ACGT"}) == (
+        "Unrecognised characters for dna: ['*']. If these are protein sequences, "
+        "pass sequence_type='protein': the molecule type is declared, never "
+        "guessed." + stop
+    )
