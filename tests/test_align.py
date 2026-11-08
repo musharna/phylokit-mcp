@@ -259,14 +259,15 @@ def test_a_failing_or_lying_aligner_is_an_error_with_its_stderr(monkeypatch, tmp
     with pytest.raises(msa.MafftFailedError, match="names or order"):
         align_sequences(fasta)
 
-    # A hung aligner is a hung server, so the wall-clock cap is a refusal.
+    # A hung aligner is a hung server, so the wall-clock cap is a refusal. The
+    # short cap is scoped so the real binary below runs under the shipped one.
     hang = tmp_path / "hang"
     hang.mkdir()
-    monkeypatch.setenv("PATH", _stand_in(hang, "exec /bin/sleep 5\n"))
-    monkeypatch.setattr(msa, "TIMEOUT_SECONDS", 0.5)
-    with pytest.raises(AlignmentError, match="did not finish within 0.5 s"):
-        align_sequences(fasta)
-    monkeypatch.setattr(msa, "TIMEOUT_SECONDS", 600)
+    with monkeypatch.context() as m:
+        m.setenv("PATH", _stand_in(hang, "exec /bin/sleep 5\n"))
+        m.setattr(msa, "TIMEOUT_SECONDS", 0.5)
+        with pytest.raises(AlignmentError, match="did not finish within 0.5 s"):
+            align_sequences(fasta)
 
     # Positive control: the same input through the real binary passes all four.
     monkeypatch.setenv("PATH", real_path)
@@ -308,11 +309,14 @@ def test_a_broken_aligner_is_reported_by_capabilities_not_a_crash(
     assert "printed nothing" in caps["aligner_error"]
     assert caps["engine_version"]  # the tree tools' answer is still there
 
+    # The short cap is scoped: left in force, it timed the real `mafft
+    # --version` below too, which takes ~0.2 s and failed on a busy machine.
     hang = tmp_path / "hang"
     hang.mkdir()
-    monkeypatch.setenv("PATH", _stand_in(hang, "exec /bin/sleep 5\n"))
-    monkeypatch.setattr(msa, "VERSION_TIMEOUT_SECONDS", 0.5)
-    caps = capabilities()
+    with monkeypatch.context() as m:
+        m.setenv("PATH", _stand_in(hang, "exec /bin/sleep 5\n"))
+        m.setattr(msa, "VERSION_TIMEOUT_SECONDS", 0.5)
+        caps = capabilities()
     assert caps["aligner_version"] is None
     assert "did not answer within 0.5 s" in caps["aligner_error"]
 
