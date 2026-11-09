@@ -25,7 +25,7 @@
    "bootstrap.py:CladeSupport.as_dict": 4,
    "bootstrap.py:bootstrap_support": 1,
    "bootstrap.py:bootstrap_support.<locals>.<genexpr>": 6,
-   "bootstrap.py:bootstrap_support.<locals>.<lambda>": 4,
+   "bootstrap.py:bootstrap_support.<locals>.<lambda>": 2,
    "bootstrap.py:resample_columns": 20,
    "bootstrap.py:validate_replicates": 2,
    "bootstrap.py:validate_support_method": 2,

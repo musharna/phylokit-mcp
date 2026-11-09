@@ -6,6 +6,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- `infer_tree`'s `conflicting_clades` listed clades of equal support in the
+  order they were first counted. Within one replicate tree that order follows
+  Python's hash seed, so two processes could return the same tie in a
+  different order. Ties are now ordered by clade name, as the ML tree's
+  `clades` already were.
+
 ## [0.9.0] — 2026-11-07
 
 ### Fixed

@@ -208,10 +208,18 @@ def bootstrap_support(
         CladeSupport(sorted(s), counts[s] / replicates, True)
         for s in sorted(ml_splits, key=lambda s: (-counts[s], format_split(s)))
     ]
+    # Filter, then sort: only the clades that are reported are ranked, so the
+    # name tie-break costs nothing for the splits that fall below the line.
+    supported_elsewhere = [
+        (s, c)
+        for s, c in counts.items()
+        if s not in ml_splits and c / replicates >= WEAK_SUPPORT
+    ]
     conflicting = [
         CladeSupport(sorted(s), c / replicates, False)
-        for s, c in sorted(counts.items(), key=lambda kv: -kv[1])
-        if s not in ml_splits and c / replicates >= WEAK_SUPPORT
+        for s, c in sorted(
+            supported_elsewhere, key=lambda kv: (-kv[1], format_split(kv[0]))
+        )
     ]
 
     values = [c.support for c in ml_clades]
