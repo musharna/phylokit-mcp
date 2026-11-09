@@ -101,6 +101,30 @@ def test_conflicting_clades_are_counted_from_zero_and_ranked_by_support(
     assert (result.n_supported, result.n_strongly_supported) == (1, 1)
 
 
+def test_tied_conflicting_clades_are_ordered_by_name_not_by_first_sighting(
+    monkeypatch,
+):
+    """C|D|E|F and E|F both reappear in 14 of 20 replicates. E|F is met first
+    (the first 4 trees hold it alone), so an order that keeps ties as they
+    were first counted lists E|F first. The ML clades already break ties by
+    name; so must the conflicting ones. Within one replicate tree "first
+    counted" is set iteration, which follows the hash seed, so two processes
+    could list the same tie differently (review of #105)."""
+    newicks = (
+        ["(A,B,C,(D,(E,F)));"] * 4
+        + ["(A,B,(C,(D,(E,F))));"] * 10
+        + ["(A,B,(C,(D,E,F)));"] * 4
+        + ["(A,B,C,(D,E,F));"] * 2
+    )
+    result, _ = _run(monkeypatch, newicks, ml="(A,B,C,(D,E,F));", seed=5)
+
+    assert result.conflicting_clades == [
+        CladeSupport(["C", "D", "E", "F"], 0.70, False),
+        CladeSupport(["E", "F"], 0.70, False),
+    ]
+    assert result.clades == [CladeSupport(["D", "E", "F"], 1.0, True)]
+
+
 def test_a_tree_with_no_clades_reports_none_not_a_number(monkeypatch):
     """Three taxa have no internal edge: nothing to support, so the mean is
     0.0 and the minimum is None, not nan, not 1.0, not an exception."""
