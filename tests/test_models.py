@@ -11,7 +11,13 @@ import math
 
 import pytest
 
-from phylokit_mcp.inference import CRITERIA, DELTA_INDISTINGUISHABLE, rank_models
+from phylokit_mcp.inference import (
+    CRITERIA,
+    DELTA_INDISTINGUISHABLE,
+    ModelScore,
+    _stats_by_name,
+    rank_models,
+)
 from phylokit_mcp.server import (
     compare_trees,
     select_substitution_model,
@@ -243,3 +249,95 @@ def test_a_best_model_piqtree_cannot_parse_does_not_lose_the_ranking():
     )
     assert out["best_model"] == "F81+F"  # the generating model (questions.json)
     assert len(out["ranking"]) == 4
+
+
+# Known answers. The tests above check orderings and use `approx` on one model,
+# so the nightly (2026-11-08) left 54 mutants of the arithmetic alive: the AICc
+# correction term and its guard, the AICc fallback, the skip rules, the
+# duplicate check's fields, and every key and rounding in `as_dict`.
+
+
+def test_aicc_is_its_definition_and_is_reported_down_to_one_spare_site():
+    """AICc = AIC + 2k(k+1)/(n-k-1), exactly. It is defined while n-k-1 >= 1:
+    at n = k+2 it is a number, at n = k+1 it is withheld."""
+    [m] = rank_models({"m": FakeStat(-100.0, 5)}, 500)
+    assert (m.aic, m.aicc, m.bic) == (210.0, 210.0 + 60 / 494, 5 * math.log(500) + 200)
+    assert m.n_free_parameters == 5
+    assert rank_models({"m": FakeStat(-100.0, 5)}, 7)[0].aicc == 210.0 + 60 / 1
+    assert rank_models({"m": FakeStat(-100.0, 5)}, 6)[0].aicc is None
+
+
+def test_aicc_ranks_by_aicc_and_falls_back_to_aic_only_where_undefined():
+    """At n=20, b wins on AIC (203 < 204) and loses on AICc (205.67 > 204.71):
+    the small-sample correction is what AICc is for. Where AICc is undefined
+    (k = n-1) the model is ranked by its AIC instead."""
+    stats = {"a": FakeStat(-100.0, 2), "b": FakeStat(-97.5, 4)}
+    assert [(m.name, m.delta) for m in rank_models(stats, 20, "AIC")] == [
+        ("b", 0.0),
+        ("a", 1.0),
+    ]
+    by_aicc = rank_models(stats, 20, "AICc")
+    assert [m.name for m in by_aicc] == ["a", "b"]
+    assert by_aicc[1].delta == (203.0 + 40 / 15) - (204.0 + 12 / 17)
+
+    fallback = rank_models(
+        {"undefined": FakeStat(-100.0, 9), "defined": FakeStat(-108.0, 2)}, 10, "AICc"
+    )
+    assert [(m.name, m.aicc) for m in fallback] == [
+        ("undefined", None),
+        ("defined", 220.0 + 12 / 7),
+    ]
+    assert fallback[1].delta == (220.0 + 12 / 7) - 218.0
+
+
+def test_an_entry_missing_either_statistic_is_skipped_wherever_it_sits():
+    """Missing lnL or missing parameter count: either one makes the entry
+    unscorable. A broken entry listed first must not end the scan."""
+
+    class OnlyLikelihood:
+        lnL = -90.0
+
+    ranked = rank_models(
+        {"broken": object(), "no_k": OnlyLikelihood(), "good": FakeStat(-100.0, 5)},
+        500,
+    )
+    assert [m.name for m in ranked] == ["good"]
+
+
+def test_duplicates_must_agree_on_the_parameter_count_too():
+    """Same name, same lnL, different parameter count is a disagreement. Two
+    entries with no statistics at all agree (nothing differs), and collapse."""
+
+    class Key:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def __str__(self) -> str:
+            return self.name
+
+    blank, blank_again = object(), object()
+    assert _stats_by_name({"m": blank, Key("m"): blank_again}) == {"m": blank}
+    with pytest.raises(RuntimeError) as exc:
+        _stats_by_name({"m": FakeStat(-100.0, 5), Key("m"): FakeStat(-100.0, 6)})
+    assert str(exc.value).startswith(
+        "model_finder reported 'm' twice with different statistics: "
+    )
+
+
+def test_a_model_score_reports_every_field_under_its_name_at_its_precision():
+    """Every value carries more digits than its rounding keeps, so one more or
+    one fewer decimal place, or none, changes the output."""
+    score = ModelScore(
+        "m", -100.123456789, 5, 210.2469135, 210.368371, 231.3194567, 1.2345678
+    )
+    assert score.as_dict() == {
+        "model": "m",
+        "log_likelihood": -100.1235,
+        "n_free_parameters": 5,
+        "aic": 210.247,
+        "aicc": 210.368,
+        "bic": 231.319,
+        "delta": 1.235,
+    }
+    undefined = ModelScore("m", -100.0, 20, 240.0, None, 300.0, 0.0)
+    assert undefined.as_dict()["aicc"] is None
