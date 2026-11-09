@@ -11,6 +11,7 @@ import math
 
 import pytest
 
+from phylokit_mcp.diagnostics import criteria_disagree, model_choice_is_close
 from phylokit_mcp.inference import (
     CRITERIA,
     DELTA_INDISTINGUISHABLE,
@@ -341,3 +342,51 @@ def test_a_model_score_reports_every_field_under_its_name_at_its_precision():
     }
     undefined = ModelScore("m", -100.0, 20, 240.0, None, 300.0, 0.0)
     assert undefined.as_dict()["aicc"] is None
+
+
+def test_criteria_disagree_speaks_only_on_a_recorded_disagreement():
+    """The advisory fires on `criteria_agree: False` and on nothing else.
+
+    A selection that does not say whether the criteria agree is not evidence
+    that they disagree: the advisory stays silent rather than inventing a
+    disagreement and then failing to name it.
+    """
+    best_by = {"AIC": "GTR+G", "AICc": "HKY+G", "BIC": "HKY+G"}
+    assert criteria_disagree({"criteria_agree": True, "best_by_criterion": {}}) is None
+    assert criteria_disagree({}) is None
+    assert criteria_disagree(
+        {"criteria_agree": False, "best_by_criterion": best_by}
+    ) == {
+        "code": "criteria_disagree",
+        "message": (
+            "AIC, AICc and BIC do not choose the same model: "
+            "{'AIC': 'GTR+G', 'AICc': 'HKY+G', 'BIC': 'HKY+G'}. BIC penalises "
+            "parameters more heavily, so this pattern usually means the extra "
+            "parameters buy a real but small likelihood gain. Which to prefer is "
+            "a judgement, not a result the data settle."
+        ),
+        "best_by_criterion": best_by,
+    }
+
+
+def test_model_choice_is_close_names_the_winner_and_every_near_tie():
+    """No near-ties, however the absence is spelled, is silence; any near-tie
+    is reported with its count, the margin, the winner and the tied models."""
+    for quiet in (
+        {},
+        {"indistinguishable_from_best": None},
+        {"indistinguishable_from_best": []},
+    ):
+        assert model_choice_is_close({"best_model": "GTR", **quiet}) is None
+    ties = ["HKY", "JC"]
+    assert model_choice_is_close(
+        {"best_model": "GTR", "indistinguishable_from_best": ties}
+    ) == {
+        "code": "model_choice_is_close",
+        "message": (
+            "2 model(s) score within 2.0 of the winner (GTR), which is the "
+            "conventional line for 'indistinguishable'. Reporting the best "
+            "model as THE model overstates what the comparison established."
+        ),
+        "models": ties,
+    }
