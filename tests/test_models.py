@@ -11,6 +11,7 @@ import math
 
 import pytest
 
+from phylokit_mcp import inference, server
 from phylokit_mcp.diagnostics import criteria_disagree, model_choice_is_close
 from phylokit_mcp.inference import (
     CRITERIA,
@@ -18,7 +19,9 @@ from phylokit_mcp.inference import (
     ModelScore,
     _stats_by_name,
     rank_models,
+    select_model,
 )
+from phylokit_mcp.inputs import InputFileError
 from phylokit_mcp.server import (
     compare_trees,
     select_substitution_model,
@@ -390,3 +393,155 @@ def test_model_choice_is_close_names_the_winner_and_every_near_tie():
         ),
         "models": ties,
     }
+
+
+# --------------------------------------------------------------------------
+# select_model and the tool around it, with model_finder replaced
+# --------------------------------------------------------------------------
+
+DNA20 = {t: "ACGTACGTACGTACGTACGT" for t in "ABCD"}
+
+
+def _scripted_model_finder(monkeypatch, stats):
+    """model_finder replaced by fixed statistics; the seed it was given is kept."""
+    seeds = []
+
+    def fake(aln, seed):
+        seeds.append(seed)
+        return stats
+
+    monkeypatch.setattr(inference, "model_finder_stats", fake)
+    return seeds
+
+
+def test_select_model_defaults_and_each_criterion_ranks_under_its_own_name(
+    monkeypatch,
+):
+    """At n = 20, b wins on AIC and a on AICc and BIC (values worked out in
+    the AICc test above), so a winner looked up under the wrong criterion,
+    or a default other than AIC, seed 1 and DNA, shows in the result."""
+    seeds = _scripted_model_finder(
+        monkeypatch, {"a": FakeStat(-100.0, 2), "b": FakeStat(-97.5, 4)}
+    )
+    result = select_model(DNA20)
+    assert seeds == [1]
+    assert (result["criterion"], result["best_model"], result["seed"]) == (
+        "AIC",
+        "b",
+        1,
+    )
+    assert result["best_by_criterion"] == {"AIC": "b", "AICc": "a", "BIC": "a"}
+    assert result["criteria_agree"] is False
+    assert "restricted_to" not in result
+
+
+def test_select_model_ties_at_exactly_the_margin_and_trims_to_top_n(monkeypatch):
+    """Seven models one parameter apart at equal likelihood: AIC deltas of
+    0, 2, 4 ... 12, exact in floating point. The model at exactly 2.0 is
+    indistinguishable; the one at 4.0 is not."""
+    stats = {f"k{k}": FakeStat(-100.0, k) for k in range(2, 9)}
+    _scripted_model_finder(monkeypatch, stats)
+    result = select_model(DNA20)
+    assert [m["model"] for m in result["ranking"]] == ["k2", "k3", "k4", "k5", "k6"]
+    assert [m["delta"] for m in result["ranking"]] == [0.0, 2.0, 4.0, 6.0, 8.0]
+    assert result["indistinguishable_from_best"] == ["k3"]
+    assert result["n_models_compared"] == 7
+    for top_n in (0, 1):
+        assert [m["model"] for m in select_model(DNA20, top_n=top_n)["ranking"]] == [
+            "k2"
+        ]
+    assert len(select_model(DNA20, top_n=6)["ranking"]) == 6
+
+
+def test_select_model_refusals_say_what_to_do(monkeypatch):
+    _scripted_model_finder(monkeypatch, {})
+    with pytest.raises(ValueError) as exc:
+        select_model(DNA20, models=[])
+    assert str(exc.value) == "models is empty; omit it to rank every model."
+    with pytest.raises(RuntimeError) as exc:
+        select_model(DNA20)
+    assert str(exc.value) == "model_finder returned no scoreable models."
+
+
+def _recording_select_model(monkeypatch):
+    calls = []
+
+    def fake(seqs, *, criterion, seed, top_n, moltype, models):
+        calls.append(
+            {
+                "criterion": criterion,
+                "seed": seed,
+                "top_n": top_n,
+                "moltype": moltype,
+                "models": models,
+            }
+        )
+        return {
+            "criterion": criterion,
+            "best_model": "m",
+            "indistinguishable_from_best": [],
+            "best_by_criterion": {c: "m" for c in CRITERIA},
+            "criteria_agree": True,
+            "seed": seed,
+            "model_warnings": [{"code": "from_restrict_models"}],
+        }
+
+    monkeypatch.setattr(server, "select_model", fake)
+    return calls
+
+
+def test_the_tool_forwards_every_argument_and_its_defaults(monkeypatch):
+    """A protein alignment is read, summarised and ranked as protein: read as
+    DNA it is refused, and summarised as DNA its stats say so."""
+    calls = _recording_select_model(monkeypatch)
+    prot = ">A\nMKLVWQERTY\n>B\nMKLVWQERTF\n>C\nMKLAWQDRTF\n>D\nMRLAWQDKTF\n"
+    result = server.select_substitution_model(fasta=prot, sequence_type="protein")
+    assert calls == [
+        {
+            "criterion": "AIC",
+            "seed": 1,
+            "top_n": 5,
+            "moltype": "protein",
+            "models": None,
+        }
+    ]
+    assert result["alignment"]["moltype"] == "protein"
+    assert "model_warnings" not in result
+    assert result["warnings"][-1] == {"code": "from_restrict_models"}
+
+
+def test_the_tool_passes_the_alignment_and_the_thread_state_to_its_advisories(
+    monkeypatch,
+):
+    """Two identical sequences must be advised on, which needs the alignment
+    stats; threads_not_pinned must follow the engine's own answer both ways."""
+    _recording_select_model(monkeypatch)
+    dup = ">A\nACGTACGTAC\n>B\nACGTACGTAC\n>C\nACGAACGTTC\n>D\nTCGAACGTTA\n"
+    for pinned in (True, False):
+        monkeypatch.setattr(
+            server.engine, "threads_pinned", lambda pinned=pinned: pinned
+        )
+        codes = [
+            w["code"] for w in server.select_substitution_model(fasta=dup)["warnings"]
+        ]
+        assert "duplicate_sequences" in codes
+        assert ("threads_not_pinned" in codes) is not pinned
+        assert codes[-1] == "from_restrict_models"
+
+
+def test_the_tool_refusals_name_the_arguments():
+    with pytest.raises(InputFileError) as exc:
+        server.select_substitution_model()
+    assert str(exc.value) == (
+        "Give fasta (the text inline) or fasta_path (the path of a file)."
+    )
+    with pytest.raises(InputFileError) as exc:
+        server.select_substitution_model(fasta=">A\nAC\n", fasta_path="x.fa")
+    assert str(exc.value).startswith("Give fasta or fasta_path, not both")
+    with pytest.raises(ValueError) as exc:
+        server.select_substitution_model(
+            fasta=">A\nACGTAC\n>B\nACGAAC\n>C\nTCGAAC\n>D\nTCGATC\n", criterion="aic"
+        )
+    assert str(exc.value) == (
+        "criterion must be one of ('AIC', 'AICc', 'BIC'), got 'aic'"
+    )
