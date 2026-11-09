@@ -12,6 +12,7 @@ import math
 import pytest
 
 from phylokit_mcp import inference, server
+from phylokit_mcp.alignment import AlignmentError
 from phylokit_mcp.diagnostics import criteria_disagree, model_choice_is_close
 from phylokit_mcp.inference import (
     CRITERIA,
@@ -491,11 +492,27 @@ def _recording_select_model(monkeypatch):
 
 
 def test_the_tool_forwards_every_argument_and_its_defaults(monkeypatch):
-    """A protein alignment is read, summarised and ranked as protein: read as
-    DNA it is refused, and summarised as DNA its stats say so."""
+    """Each argument reaches select_model as given, and each default as
+    documented: the non-default call tells forwarding from a hardcoded
+    literal. A protein alignment declared as DNA is refused before anything
+    is ranked; declared as protein it is read, summarised and ranked so."""
     calls = _recording_select_model(monkeypatch)
     prot = ">A\nMKLVWQERTY\n>B\nMKLVWQERTF\n>C\nMKLAWQDRTF\n>D\nMRLAWQDKTF\n"
+    with pytest.raises(AlignmentError) as exc:
+        server.select_substitution_model(fasta=prot)
+    assert str(exc.value).startswith(
+        "Unrecognised characters for dna: ['E', 'F', 'L', 'Q']."
+    )
+    assert calls == []
     result = server.select_substitution_model(fasta=prot, sequence_type="protein")
+    server.select_substitution_model(
+        fasta=prot,
+        sequence_type="protein",
+        criterion="BIC",
+        seed=7,
+        top_n=3,
+        models=["LG", "WAG"],
+    )
     assert calls == [
         {
             "criterion": "AIC",
@@ -503,7 +520,14 @@ def test_the_tool_forwards_every_argument_and_its_defaults(monkeypatch):
             "top_n": 5,
             "moltype": "protein",
             "models": None,
-        }
+        },
+        {
+            "criterion": "BIC",
+            "seed": 7,
+            "top_n": 3,
+            "moltype": "protein",
+            "models": ["LG", "WAG"],
+        },
     ]
     assert result["alignment"]["moltype"] == "protein"
     assert "model_warnings" not in result
