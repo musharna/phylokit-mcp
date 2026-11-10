@@ -43,15 +43,19 @@ class _Lines:
     reports the drained pipe idle while the second waits there. If that second
     message is the last one, nothing ever wakes the select and a finished call
     reads as a silent one. Here the only buffer is this one.
+
+    A line the peer cut off by closing is not a line: `next` still reports EOF,
+    and the fragment waits in `cut_off` for the caller's failure message.
     """
 
     def __init__(self, pipe):
         self.fd = pipe.fileno()
         self.buf = b""
+        self.cut_off = ""
 
     def next(self, timeout: float) -> str | None:
         """The next non-blank line; None if none completes within `timeout`
-        seconds; "" once the other end has closed and nothing is left."""
+        seconds; "" once the other end has closed."""
         deadline = time.monotonic() + timeout
         while True:
             line, nl, rest = self.buf.partition(b"\n")
@@ -65,10 +69,9 @@ class _Lines:
                 return None
             chunk = os.read(self.fd, 65536)
             if not chunk:
-                # A last line cut off by the peer closing is still returned:
-                # it is the evidence of a crash mid-message.
-                tail, self.buf = self.buf.strip(), b""
-                return tail.decode()
+                self.cut_off += self.buf.decode(errors="replace").strip()
+                self.buf = b""
+                return ""
             self.buf += chunk
 
 
@@ -104,9 +107,11 @@ def _read_until(stdout, wanted, stderr_file, timeout=HANDSHAKE_TIMEOUT):
     if not wanted <= responses.keys():
         stderr_file.seek(0)
         missing = sorted(wanted - responses.keys())
+        cut = f"cut off at EOF: {lines.cut_off}. " if lines.cut_off else ""
         raise AssertionError(
             f"no response to id(s) {missing} within {timeout}s. "
-            f"got ids {sorted(responses)}. server stderr:\n{stderr_file.read()[-2000:]}"
+            f"got ids {sorted(responses)}. {cut}"
+            f"server stderr:\n{stderr_file.read()[-2000:]}"
         )
     return responses
 
@@ -419,7 +424,9 @@ def test_long_calls_send_progress_so_a_client_idle_timeout_does_not_fire(fasta_e
                 f"{sorted(set(calls) - set(done))} still running: "
                 + stderr_file.read()[-2000:]
             )
-            assert set(done) == set(calls), stderr_file.read()[-2000:]
+            assert set(done) == set(calls), (
+                f"cut off at EOF: {lines.cut_off!r}. " if lines.cut_off else ""
+            ) + stderr_file.read()[-2000:]
         finally:
             if not stdin.closed:
                 stdin.close()
@@ -458,8 +465,36 @@ def test_a_line_already_taken_off_the_pipe_is_returned_at_once():
         os.write(w, b": 3}\n")
         assert lines.next(5) == '{"c": 3}'
         assert _lines(pipe) is lines
-        # A server that dies mid-message: the cut-off line comes back, then EOF.
+        # A server that dies mid-message: EOF, with the fragment kept aside.
+        assert lines.cut_off == ""
         os.write(w, b'{"d": ')
         os.close(w)
-        assert lines.next(5) == '{"d":'
         assert lines.next(5) == ""
+        assert lines.cut_off == '{"d":'
+
+
+def test_a_server_that_dies_mid_message_is_reported_with_what_it_sent():
+    """The caller's side of a crash mid-response: `_read_until` names the
+    unanswered id, the cut-off text and the server's stderr, instead of
+    stopping on the fragment. Id 0 arrives whole: the positive control."""
+    script = (
+        "import os, sys; sys.stderr.write('boom\\n'); sys.stderr.flush(); "
+        'os.write(1, b\'{"id": 0}\\n{"id": 1, "res\')'
+    )
+    with tempfile.TemporaryFile(mode="w+") as stderr_file:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            stderr=stderr_file,
+            text=True,
+            bufsize=1,
+        )
+        try:
+            with pytest.raises(AssertionError) as err:
+                _read_until(proc.stdout, {0, 1}, stderr_file, timeout=30)
+        finally:
+            proc.wait(timeout=30)
+    assert str(err.value) == (
+        "no response to id(s) [1] within 30s. got ids [0]. "
+        'cut off at EOF: {"id": 1, "res. server stderr:\nboom\n'
+    )
