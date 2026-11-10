@@ -19,6 +19,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   on one alignment, and the exact match missed them in a named set too. The
   warning's message now names the twins ModelFinder produces.
 
+- A path argument (`fasta_path`, `trees_path`, `out_path`) starting with
+  `~name` for a user the host does not have reached the client as a bare
+  "Error executing tool ..." with no reason: `expanduser` raises
+  RuntimeError, which no clause caught. A path with a NUL byte gave
+  CPython's "embedded null byte" without the argument's name. Both are now
+  refusals that name the argument and say what to send instead.
+
 ## [0.9.1] — 2026-11-08
 
 ### Fixed

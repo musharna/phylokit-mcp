@@ -19,7 +19,12 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from phylokit_mcp import inputs
-from phylokit_mcp.inputs import InputFileError, read_path, text_or_path
+from phylokit_mcp.inputs import (
+    InputFileError,
+    read_path,
+    text_or_path,
+    write_new_file,
+)
 from phylokit_mcp.server import (
     _two_trees,
     align_sequences,
@@ -125,6 +130,53 @@ def test_a_missing_relative_path_names_the_servers_directory(tmp_path, monkeypat
         read_path("elsewhere.fasta", "fasta_path")
 
 
+def test_a_home_path_expands_and_an_unknown_user_is_refused(tmp_path, monkeypatch):
+    """`~user` for a user the host does not have made pathlib raise a bare
+    RuntimeError, which the server masks as an opaque crash (fuzz issue 55)."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "x.fasta").write_text(">a\nACGT\n")
+    assert read_path("~/x.fasta", "fasta_path") == ">a\nACGT\n"
+    assert write_new_file("~/out.fasta", ">a\nA\n", "out_path") == str(
+        tmp_path / "out.fasta"
+    )
+    calls = (
+        ("fasta_path", lambda p: read_path(p, "fasta_path")),
+        ("out_path", lambda p: write_new_file(p, ">a\nA\n", "out_path")),
+    )
+    for param, call in calls:
+        with pytest.raises(InputFileError) as exc:
+            call("~nobodyuserxyz/x.fasta")
+        assert str(exc.value) == (
+            f"{param}: cannot expand '~nobodyuserxyz' in '~nobodyuserxyz/x.fasta': "
+            "that home directory cannot be determined on the server's host. Give "
+            "an absolute path, or one relative to the server's working directory, "
+            f"{tmp_path}."
+        )
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["out.fasta", "x.fasta"]
+
+
+def test_a_nul_byte_in_a_path_is_refused_by_name(tmp_path, monkeypatch):
+    """A NUL made CPython raise its own ValueError before any errno, past every
+    except clause, so the caller saw "embedded null byte" with no parameter."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a").write_text(">a\nACGT\n")
+    assert read_path("a", "fasta_path") == ">a\nACGT\n"
+    with pytest.raises(InputFileError) as exc:
+        read_path("a\x00b", "fasta_path")
+    assert str(exc.value) == (
+        "fasta_path contains a NUL byte, which no file name can; give the path of a file."
+    )
+    with pytest.raises(InputFileError) as exc:
+        write_new_file("b\x00", ">a\nA\n", "out_path")
+    assert str(exc.value) == (
+        "out_path contains a NUL byte, which no file name can; give the path of a "
+        "new file."
+    )
+    assert write_new_file("b", ">a\nA\n", "out_path") == str(tmp_path / "b")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a", "b"]
+
+
 def test_the_size_cap_is_enforced_at_the_boundary(tmp_path, monkeypatch):
     monkeypatch.setattr(inputs, "MAX_INPUT_BYTES", 100)
     ok = tmp_path / "ok.fasta"
@@ -148,6 +200,18 @@ def test_a_path_refusal_reaches_the_model_through_the_server(tmp_path, fasta_eas
         )
         with pytest.raises(ToolError, match="no such file"):
             await mcp.call_tool("infer_tree", {"fasta_path": str(tmp_path / "nope")})
+        # Refusals raised before any file is touched reach the model with their
+        # reason, not as the SDK's bare "Error executing tool infer_tree".
+        with pytest.raises(
+            ToolError,
+            match="^Error executing tool infer_tree: fasta_path: cannot expand '~nobody",
+        ):
+            await mcp.call_tool("infer_tree", {"fasta_path": "~nobodyuserxyz/x"})
+        with pytest.raises(
+            ToolError,
+            match="^Error executing tool infer_tree: fasta_path contains a NUL byte",
+        ):
+            await mcp.call_tool("infer_tree", {"fasta_path": "a\x00b"})
         return ok
 
     assert anyio.run(run) is not None
@@ -208,6 +272,10 @@ def test_a_real_server_process_reads_a_relative_path_from_its_cwd(tmp_path):
                 "jsonrpc": "2.0", "id": 3, "method": "tools/call",
                 "params": {"name": "compare_trees", "arguments": {"trees_path": "nope.nwk"}},
             })  # fmt: skip
+            nobody = _rpc(proc, {
+                "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                "params": {"name": "compare_trees", "arguments": {"trees_path": "~nobodyuserxyz/t.nwk"}},
+            })  # fmt: skip
         finally:
             proc.stdin.close()
             proc.wait(timeout=30)
@@ -216,3 +284,9 @@ def test_a_real_server_process_reads_a_relative_path_from_its_cwd(tmp_path):
     assert bad["result"]["isError"] is True
     assert "no such file" in bad["result"]["content"][0]["text"]
     assert str(tmp_path) in bad["result"]["content"][0]["text"]
+    # A path the host cannot expand is a named refusal over the wire, not the
+    # SDK's bare "Error executing tool compare_trees" (fuzz issue 55).
+    assert nobody["result"]["isError"] is True
+    assert nobody["result"]["content"][0]["text"].startswith(
+        "Error executing tool compare_trees: trees_path: cannot expand '~nobodyuserxyz'"
+    ), nobody

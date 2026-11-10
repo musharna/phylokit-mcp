@@ -15,6 +15,8 @@ Each check below is a refusal (a ValueError, which the server surfaces with its
 message), never a silent fallback:
 
 - exactly one of the inline text and the path is given;
+- the path has no NUL byte, and a leading `~name` names a home directory the
+  host can find;
 - the path names a regular file (a FIFO or device would block or never end);
 - it is at most MAX_INPUT_BYTES, read with a bound so a file that grows after
   the size check cannot slip past it;
@@ -37,13 +39,37 @@ class InputFileError(ValueError):
     """A file-path argument that cannot be used, with the reason named."""
 
 
+def _as_path(path: str, param: str, what: str) -> tuple[Path, str]:
+    """`path` as a Path with `~` expanded, and how to name it in a refusal.
+
+    Two inputs fail inside the standard library before any errno exists, so
+    the OSError clauses below never see them (fuzz issue 55): a NUL byte makes
+    CPython raise its own ValueError at the system-call boundary, and `~name`
+    for a user the host does not have makes `expanduser` raise RuntimeError.
+    Both are the caller's argument at fault, so both are refused here by name.
+    """
+    if not isinstance(path, str) or not path.strip():
+        raise InputFileError(f"{param} is empty; give the path of {what}.")
+    if "\x00" in path:
+        raise InputFileError(
+            f"{param} contains a NUL byte, which no file name can; give the path of {what}."
+        )
+    try:
+        p = Path(path).expanduser()
+    except RuntimeError:
+        head = path.split("/", 1)[0]
+        raise InputFileError(
+            f"{param}: cannot expand {head!r} in {path!r}: that home directory "
+            "cannot be determined on the server's host. Give an absolute path, or "
+            f"one relative to the server's working directory, {os.getcwd()}."
+        ) from None
+    where = f" (relative paths resolve against the server's working directory, {os.getcwd()})"
+    return p, str(p) if p.is_absolute() else f"{p}{where}"
+
+
 def read_path(path: str, param: str) -> str:
     """The text of the file at `path`, or a refusal naming what is wrong."""
-    if not isinstance(path, str) or not path.strip():
-        raise InputFileError(f"{param} is empty; give the path of a file.")
-    p = Path(path).expanduser()
-    where = f" (relative paths resolve against the server's working directory, {os.getcwd()})"
-    shown = str(p) if p.is_absolute() else f"{p}{where}"
+    p, shown = _as_path(path, param, "a file")
     try:
         st = os.stat(p)
     except FileNotFoundError:
@@ -107,11 +133,7 @@ def write_new_file(path: str, text: str, param: str) -> str:
     The parent directory must exist; nothing is created on the caller's behalf.
     Relative paths resolve against this process's working directory, as above.
     """
-    if not isinstance(path, str) or not path.strip():
-        raise InputFileError(f"{param} is empty; give the path of a new file.")
-    p = Path(path).expanduser()
-    where = f" (relative paths resolve against the server's working directory, {os.getcwd()})"
-    shown = str(p) if p.is_absolute() else f"{p}{where}"
+    p, shown = _as_path(path, param, "a new file")
     if not p.parent.is_dir():
         raise InputFileError(f"{param}: no such directory: {p.parent} for {shown}.")
     try:
