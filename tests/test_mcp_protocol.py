@@ -382,3 +382,126 @@ def test_long_calls_send_progress_so_a_client_idle_timeout_does_not_fire(fasta_e
     for tok, values in progress.items():
         assert len(values) >= 2, (tok, values)
         assert values == sorted(values) and len(set(values)) == len(values), values
+
+
+_RO = {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False}
+
+
+def test_the_real_server_publishes_each_tools_title_hints_and_output_schema():
+    """What a client reads before it calls anything: the server's instructions,
+    and per tool a title, the behaviour hints and an output schema. Read over
+    stdio from the real entry point, and compared whole: a client deciding
+    whether a call is safe to retry reads `idempotentHint`, not the docstring.
+    `align_sequences` alone is not read-only, since `out_path` creates a file,
+    and not destructive, since an existing file is refused."""
+    from phylokit_mcp.server import INSTRUCTIONS
+
+    want = {
+        "infer_tree": ("Infer a phylogenetic tree with bootstrap support", _RO),
+        "select_substitution_model": (
+            "Rank substitution models, with the margin over the runners-up",
+            _RO,
+        ),
+        "compare_trees": ("Compare two tree topologies", _RO),
+        "simulate_alignment": ("Simulate an alignment from a known tree", _RO),
+        "align_sequences": (
+            "Align sequences with MAFFT, ready for infer_tree",
+            {
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        ),
+        "map_positions": (
+            "Map a residue to its alignment column and across sequences",
+            _RO,
+        ),
+        "capabilities": ("Engine capabilities and limits", _RO),
+    }
+    init = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        },
+    }
+    with tempfile.TemporaryFile(mode="w+") as stderr_file:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "phylokit_mcp.server"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr_file,
+            text=True,
+            bufsize=1,
+        )
+        stdin, stdout = proc.stdin, proc.stdout
+        assert stdin is not None and stdout is not None
+        try:
+            stdin.write(json.dumps(init) + "\n")
+            stdin.flush()
+            responses = _read_until(stdout, {1}, stderr_file)
+            for msg in (
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            ):
+                stdin.write(json.dumps(msg) + "\n")
+            stdin.flush()
+            responses |= _read_until(stdout, {2}, stderr_file)
+        finally:
+            if not stdin.closed:
+                stdin.close()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=30)
+
+    assert responses[1]["result"]["instructions"] == INSTRUCTIONS
+    tools = responses[2]["result"]["tools"]
+    assert {t["name"]: (t.get("title"), t.get("annotations")) for t in tools} == want
+    for t in tools:
+        assert t.get("outputSchema", {}).get("type") == "object", t["name"]
+
+
+def test_capabilities_reports_its_limits_and_models_whole():
+    """The bounds a caller plans around, by name: a renamed key reads as
+    "no limit". The model list is opt-in and holds the engine's own names."""
+    from phylokit_mcp.server import capabilities
+
+    caps = capabilities()
+    assert set(caps) == {
+        "engine",
+        "engine_version",
+        "iqtree_version",
+        "n_substitution_models",
+        "criteria",
+        "aligner_version",
+        "aligner_error",
+        "limits",
+        "support_thresholds",
+        "threads_pinned",
+    }
+    assert caps["engine"] == "IQ-TREE 3 via piqtree"
+    assert caps["limits"] == {
+        "min_sequences_to_align": 2,
+        "min_taxa": 4,
+        "max_taxa": 200,
+        "max_sites": 100000,
+        "min_replicates": 20,
+        "max_replicates": 1000,
+        "ufboot_min_replicates": 1000,
+        "ufboot_max_replicates": 10000,
+    }
+    assert caps["support_thresholds"] == {
+        "supported": 0.7,
+        "strong": 0.95,
+        "ufboot_supported": 0.95,
+    }
+    models = capabilities(include_models=True)["substitution_models"]
+    assert models == sorted(models)
+    assert len(models) == caps["n_substitution_models"]
+    assert {"JC", "HKY", "GTR", "LG", "WAG"} <= set(models)
