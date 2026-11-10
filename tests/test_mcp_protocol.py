@@ -51,7 +51,7 @@ class _Lines:
 
     def next(self, timeout: float) -> str | None:
         """The next non-blank line; None if none completes within `timeout`
-        seconds; "" once the other end has closed."""
+        seconds; "" once the other end has closed and nothing is left."""
         deadline = time.monotonic() + timeout
         while True:
             line, nl, rest = self.buf.partition(b"\n")
@@ -65,7 +65,10 @@ class _Lines:
                 return None
             chunk = os.read(self.fd, 65536)
             if not chunk:
-                return ""
+                # A last line cut off by the peer closing is still returned:
+                # it is the evidence of a crash mid-message.
+                tail, self.buf = self.buf.strip(), b""
+                return tail.decode()
             self.buf += chunk
 
 
@@ -455,5 +458,8 @@ def test_a_line_already_taken_off_the_pipe_is_returned_at_once():
         os.write(w, b": 3}\n")
         assert lines.next(5) == '{"c": 3}'
         assert _lines(pipe) is lines
+        # A server that dies mid-message: the cut-off line comes back, then EOF.
+        os.write(w, b'{"d": ')
         os.close(w)
+        assert lines.next(5) == '{"d":'
         assert lines.next(5) == ""
