@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import json
 import os
-import selectors
+import select
 import subprocess
 import sys
 import tempfile
 import time
+import weakref
 
 import pytest
 
@@ -34,32 +35,69 @@ STREAM_SILENCE_S = 30
 RUN_CAP_S = 1800
 
 
+class _Lines:
+    """Lines from a pipe with a timeout, read from its fd so no line can hide.
+
+    `select()` on the fd next to `readline()` on the text wrapper loses lines:
+    one read() can pull two messages into Python's buffer, and select then
+    reports the drained pipe idle while the second waits there. If that second
+    message is the last one, nothing ever wakes the select and a finished call
+    reads as a silent one. Here the only buffer is this one.
+    """
+
+    def __init__(self, pipe):
+        self.fd = pipe.fileno()
+        self.buf = b""
+
+    def next(self, timeout: float) -> str | None:
+        """The next non-blank line; None if none completes within `timeout`
+        seconds; "" once the other end has closed."""
+        deadline = time.monotonic() + timeout
+        while True:
+            line, nl, rest = self.buf.partition(b"\n")
+            if nl:
+                self.buf = rest
+                if line.strip():
+                    return line.decode().strip()
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([self.fd], [], [], remaining)[0]:
+                return None
+            chunk = os.read(self.fd, 65536)
+            if not chunk:
+                return ""
+            self.buf += chunk
+
+
+# One reader per pipe for its whole life: a second reader would not see the
+# bytes the first one has already taken off the fd.
+_READERS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _lines(pipe) -> _Lines:
+    if pipe not in _READERS:
+        _READERS[pipe] = _Lines(pipe)
+    return _READERS[pipe]
+
+
 def _read_until(stdout, wanted, stderr_file, timeout=HANDSHAKE_TIMEOUT):
     """Read JSON-RPC lines until every id in `wanted` has answered, or time out.
 
     Returns as soon as the wanted ids arrive, so the caller can keep stdin open
     until it actually has what it asked for.
     """
-    sel = selectors.DefaultSelector()
-    sel.register(stdout, selectors.EVENT_READ)
+    lines = _lines(stdout)
     responses: dict = {}
     deadline = time.monotonic() + timeout
-    try:
-        while not wanted <= responses.keys():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 or not sel.select(timeout=remaining):
-                break
-            line = stdout.readline()
-            if not line:  # server closed stdout
-                break
-            line = line.strip()
-            if not line.startswith("{"):
-                continue
-            msg = json.loads(line)
-            if "id" in msg:
-                responses[msg["id"]] = msg
-    finally:
-        sel.close()
+    while not wanted <= responses.keys():
+        line = lines.next(deadline - time.monotonic())
+        if not line:  # timed out (None) or the server closed stdout ("")
+            break
+        if not line.startswith("{"):
+            continue
+        msg = json.loads(line)
+        if "id" in msg:
+            responses[msg["id"]] = msg
     if not wanted <= responses.keys():
         stderr_file.seek(0)
         missing = sorted(wanted - responses.keys())
@@ -349,21 +387,22 @@ def test_long_calls_send_progress_so_a_client_idle_timeout_does_not_fire(fasta_e
 
             progress: dict[str, list[float]] = {"tok3": [], "tok4": []}
             done: dict[int, dict] = {}
-            sel = selectors.DefaultSelector()
-            sel.register(stdout, selectors.EVENT_READ)
+            lines = _lines(stdout)
             cap = time.monotonic() + RUN_CAP_S
             silent_for: float | None = None
             last = time.monotonic()
             while set(done) != set(calls) and time.monotonic() < cap:
-                wait = min(STREAM_SILENCE_S, cap - time.monotonic())
-                if not sel.select(timeout=wait):
-                    silent_for = time.monotonic() - last
+                line = lines.next(min(STREAM_SILENCE_S, cap - time.monotonic()))
+                if line is None:
+                    # Near the cap the wait is cut short; that is the hang
+                    # guard firing, reported below as unanswered calls.
+                    if time.monotonic() < cap:
+                        silent_for = time.monotonic() - last
+                    break
+                if not line:  # the server closed stdout
                     break
                 last = time.monotonic()
-                line = stdout.readline().strip()
                 if not line.startswith("{"):
-                    if not line:
-                        break
                     continue
                 msg = json.loads(line)
                 if msg.get("method") == "notifications/progress":
@@ -371,7 +410,6 @@ def test_long_calls_send_progress_so_a_client_idle_timeout_does_not_fire(fasta_e
                     progress[p["progressToken"]].append(p["progress"])
                 elif msg.get("id") in calls:
                     done[msg["id"]] = msg
-            sel.close()
             stderr_file.seek(0)
             assert silent_for is None, (
                 f"the stream was silent for {silent_for:.1f} s with calls "
@@ -398,3 +436,24 @@ def test_long_calls_send_progress_so_a_client_idle_timeout_does_not_fire(fasta_e
     for tok, values in progress.items():
         assert len(values) >= 2, (tok, values)
         assert values == sorted(values) and len(set(values)) == len(values), values
+
+
+def test_a_line_already_taken_off_the_pipe_is_returned_at_once():
+    """Two messages in one write. `select()` then `readline()` -- the pattern
+    `_Lines` replaced -- reported the second one as 2 s of silence; a last
+    response stranded that way failed the progress test with the server done."""
+    r, w = os.pipe()
+    with os.fdopen(r) as pipe:
+        lines = _lines(pipe)
+        os.write(w, b'{"a": 1}\n\n{"b": 2}\n{"c"')
+        assert lines.next(5) == '{"a": 1}'
+        t = time.monotonic()
+        assert lines.next(5) == '{"b": 2}'
+        assert time.monotonic() - t < 1
+        # A real silence still reads as one, and a part-line is not a line.
+        assert lines.next(0.2) is None
+        os.write(w, b": 3}\n")
+        assert lines.next(5) == '{"c": 3}'
+        assert _lines(pipe) is lines
+        os.close(w)
+        assert lines.next(5) == ""
