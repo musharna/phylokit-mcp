@@ -26,6 +26,12 @@ import pytest
 TINY = ">a\nACGTACGTAA\n>b\nACGTACGTAA\n>c\nTCGAACGTAA\n>d\nTCGAACGTAA\n"
 
 HANDSHAKE_TIMEOUT = 180
+# The progress test bounds SILENCE, which is what a client's idle timeout acts
+# on, not the calls' total run time, which grows with a busy host: two queued
+# 100-replicate bootstraps took 292 s on a laptop at load 50 and failed a 180 s
+# total. STREAM_SILENCE_S is many heartbeats long; RUN_CAP_S only stops a hang.
+STREAM_SILENCE_S = 30
+RUN_CAP_S = 1800
 
 
 def _read_until(stdout, wanted, stderr_file, timeout=HANDSHAKE_TIMEOUT):
@@ -345,10 +351,15 @@ def test_long_calls_send_progress_so_a_client_idle_timeout_does_not_fire(fasta_e
             done: dict[int, dict] = {}
             sel = selectors.DefaultSelector()
             sel.register(stdout, selectors.EVENT_READ)
-            deadline = time.monotonic() + HANDSHAKE_TIMEOUT
-            while set(done) != set(calls) and time.monotonic() < deadline:
-                if not sel.select(timeout=deadline - time.monotonic()):
+            cap = time.monotonic() + RUN_CAP_S
+            silent_for: float | None = None
+            last = time.monotonic()
+            while set(done) != set(calls) and time.monotonic() < cap:
+                wait = min(STREAM_SILENCE_S, cap - time.monotonic())
+                if not sel.select(timeout=wait):
+                    silent_for = time.monotonic() - last
                     break
+                last = time.monotonic()
                 line = stdout.readline().strip()
                 if not line.startswith("{"):
                     if not line:
@@ -362,6 +373,11 @@ def test_long_calls_send_progress_so_a_client_idle_timeout_does_not_fire(fasta_e
                     done[msg["id"]] = msg
             sel.close()
             stderr_file.seek(0)
+            assert silent_for is None, (
+                f"the stream was silent for {silent_for:.1f} s with calls "
+                f"{sorted(set(calls) - set(done))} still running: "
+                + stderr_file.read()[-2000:]
+            )
             assert set(done) == set(calls), stderr_file.read()[-2000:]
         finally:
             if not stdin.closed:
