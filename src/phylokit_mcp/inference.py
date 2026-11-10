@@ -3,8 +3,9 @@
 Model selection returns the runners-up, not just the winner. IQ-TREE's
 `model_finder` reports a single best model per criterion, and a caller handed one
 name will state it as a finding. Measured on the test suite's 300-site alignment
-simulated under JC (piqtree 0.8.3, seed 1), the AIC winner is TPM2u (tied with
-TPM2) — a model the data were not generated under — and JC trails it by only 0.7 AIC units. A
+simulated under JC (piqtree 0.8.3, simulation seed 42, ModelFinder seed 1), the
+AIC winner is TPM2u (one model with TPM2, see `same_model_warnings`) — a model
+the data were not generated under — and JC trails it by only 0.7 AIC units. A
 winner without its margin is a claim the numbers do not support.
 """
 
@@ -130,7 +131,7 @@ def rank_models(
 # scored by model_finder with EQUAL frequencies (measured: bare F81 has the
 # log-likelihood and parameter count of JC), so HKY85 is "HKY+F". Bare "F81" is
 # an IQ-TREE name in its own right and is not rewritten; the same-likelihood
-# warning in `restrict_models` is what flags it.
+# warning (`same_model_warnings`) is what flags it.
 TEXTBOOK_NAMES = {"JC69": "JC", "K80": "K2P", "HKY85": "HKY+F"}
 
 
@@ -141,7 +142,7 @@ def restrict_models(
 
     Returns the subset, the textbook names that were resolved to IQ-TREE names,
     and warnings for requested models that are the same model under two names
-    (identical log-likelihood and parameter count). An unknown name is refused
+    (`same_model_warnings`). An unknown name is refused
     with the names that were compared, never dropped: a silently shorter set
     would rank the survivors as if the missing model had lost.
     """
@@ -161,26 +162,61 @@ def restrict_models(
             f"it scored: {bases}."
         )
     subset = {w: by_name[w] for w in dict.fromkeys(wanted)}
+    return subset, resolved, same_model_warnings(subset)
+
+
+# Two names for one model differ in log-likelihood only by the optimiser's
+# convergence: measured 2026-11-10 on the suite's seed-42 alignment, F81 and JC
+# 1e-6 apart, TPM2 and TPM2u 1.4e-5. An exact comparison called those two
+# models. Under 1e-3 the AIC gap is under 0.002, which the reply prints
+# (delta, 3 decimals) as no gap at all.
+SAME_MODEL_LNL_TOLERANCE = 1e-3
+
+
+def same_model_warnings(stats: dict, shown: list[str] | None = None) -> list[dict]:
+    """One warning per pair of names that are one model in these statistics.
+
+    One model means the same parameter count and log-likelihoods within
+    SAME_MODEL_LNL_TOLERANCE. ModelFinder scores a bare unequal-frequency name
+    with equal frequencies, so it ranks each such model twice: measured on
+    JC-simulated data, F81 = JC, HKY = K2P, TN = TNe, GTR = SYM, TPM2u = TPM2,
+    TPM3u = TPM3, TIM = TIMe, TVM = TVMe, each also with +I and +G4. Each name
+    is paired with the first earlier name it matches. With `shown`, only pairs
+    with at least one of those names are reported: the default ranking scores
+    every model, and the caller sees `top_n` of them.
+    """
     warnings: list[dict] = []
-    seen: dict[tuple, str] = {}
-    for name, stat in subset.items():
-        sig = (getattr(stat, "lnL", None), getattr(stat, "nfp", None))
-        if sig in seen:
-            warnings.append(
-                {
-                    "code": "same_model_two_names",
-                    "message": (
-                        f"{name!r} and {seen[sig]!r} have the same log-likelihood and "
-                        "parameter count: they are one model here. In IQ-TREE a bare "
-                        "'F81' or 'HKY' has equal base frequencies (F81 = JC, HKY = "
-                        "K2P); the textbook F81 and HKY85 are 'F81+F' and 'HKY+F'."
-                    ),
-                    "models": [seen[sig], name],
-                }
-            )
-        else:
-            seen[sig] = name
-    return subset, resolved, warnings
+    # The first name seen for each parameter count, with its log-likelihood.
+    firsts: dict[int, list[tuple[str, float]]] = {}
+    for name, stat in stats.items():
+        lnl = getattr(stat, "lnL", None)
+        k = getattr(stat, "nfp", None)
+        if lnl is None or k is None:
+            continue
+        twin = None
+        for first, first_lnl in firsts.get(k, []):
+            if abs(first_lnl - lnl) <= SAME_MODEL_LNL_TOLERANCE:
+                twin = first
+                break
+        if twin is None:
+            firsts.setdefault(k, []).append((name, float(lnl)))
+            continue
+        if shown is not None and twin not in shown and name not in shown:
+            continue
+        warnings.append(
+            {
+                "code": "same_model_two_names",
+                "message": (
+                    f"{twin!r} and {name!r} have the same log-likelihood and "
+                    "parameter count: they are one model here. ModelFinder scores "
+                    "a bare 'F81', 'HKY', 'TN' or 'GTR' with equal base frequencies "
+                    "(F81 = JC, HKY = K2P, TN = TNe, GTR = SYM); the textbook F81 "
+                    "and HKY85 are 'F81+F' and 'HKY+F'."
+                ),
+                "models": [twin, name],
+            }
+        )
+    return warnings
 
 
 def model_finder_stats(aln, seed: int) -> dict:
@@ -252,15 +288,13 @@ def select_model(
 
     ties = [m for m in ranked[1:] if m.delta <= DELTA_INDISTINGUISHABLE]
     best_by = {c: rank_models(stats, n_sites, c)[0].name for c in CRITERIA}
+    # A named set is returned whole: it was asked for model by model.
+    shown = ranked if models is not None else ranked[: max(1, top_n)]
     out = {
         "criterion": criterion,
         "best_model": ranked[0].name,
         "n_models_compared": len(ranked),
-        # A named set is returned whole: it was asked for model by model.
-        "ranking": [
-            m.as_dict()
-            for m in (ranked if models is not None else ranked[: max(1, top_n)])
-        ],
+        "ranking": [m.as_dict() for m in shown],
         "indistinguishable_from_best": [m.name for m in ties],
         "best_by_criterion": best_by,
         "criteria_agree": len(set(best_by.values())) == 1,
@@ -269,7 +303,11 @@ def select_model(
     if models is not None:
         out["restricted_to"] = list(stats)
         out["resolved_names"] = resolved
-        out["model_warnings"] = warnings
+    else:
+        # The same advisory as a named set gets: without it the default ranking
+        # could name F81 the winner over JC, at delta 0, as if they differed.
+        warnings = same_model_warnings(stats, shown=[m.name for m in shown])
+    out["model_warnings"] = warnings
     return out
 
 

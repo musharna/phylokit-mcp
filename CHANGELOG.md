@@ -6,6 +6,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- `select_substitution_model` without `models=` could name bare F81 the
+  winner over JC at delta 0 with no warning, on data simulated under JC.
+  ModelFinder scores a bare unequal-frequency name (F81, HKY, TN, GTR, TPM2u,
+  ...) with equal frequencies, so each such model is ranked twice under two
+  names. The `same_model_two_names` warning, which only a named `models=` set
+  got, now also covers the default ranking: every pair with at least one name
+  in the returned `ranking`. Twins are now matched to within 0.001
+  log-likelihood units, not exactly: the engine scored F81 and JC 1e-6 apart
+  on one alignment, and the exact match missed them in a named set too. The
+  warning's message now names the twins ModelFinder produces.
+
 ## [0.9.1] — 2026-11-08
 
 ### Fixed
