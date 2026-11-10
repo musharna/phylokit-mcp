@@ -11,12 +11,21 @@ from __future__ import annotations
 
 import os
 import random
+import shutil
 import stat
+import subprocess
+from pathlib import Path
 
 import pytest
 
-from phylokit_mcp import msa
-from phylokit_mcp.alignment import AlignmentError, parse_fasta
+from phylokit_mcp import engine, msa
+from phylokit_mcp.alignment import (
+    AlignmentError,
+    parse_fasta,
+    require_phylogenetic_signal,
+    validate,
+)
+from phylokit_mcp.inputs import InputFileError
 from phylokit_mcp.server import (
     align_sequences,
     build_server,
@@ -446,3 +455,213 @@ def test_the_refusals_built_only_from_f_strings_are_asserted_whole_too():
         "pass sequence_type='protein': the molecule type is declared, never "
         "guessed." + stop
     )
+
+
+# --------------------------------------------------------------------------
+# What MAFFT is run with, and what its failures report, compared whole
+# --------------------------------------------------------------------------
+
+
+def _eight() -> dict[str, str]:
+    """Eight distinct sequences: more names than an error message lists."""
+    anc = _ancestor()
+    return {f"s{i}": _substitute(anc, [i, 30 + i, 70 + 2 * i]) for i in range(8)}
+
+
+def _wrapping(tmp_path, name: str, script: str, path: str) -> str:
+    """A stand-in that runs the REAL binary and edits its output with sed.
+
+    PATH holds only the stand-in, so both are looked up on the real `path`,
+    and the real MAFFT (a shell script) runs with that `path` restored."""
+    real, sed = shutil.which("mafft", path=path), shutil.which("sed", path=path)
+    assert real and sed, "these tests need the real MAFFT, and sed, on PATH"
+    d = tmp_path / name
+    d.mkdir()
+    return _stand_in(d, f'PATH="{path}" "{real}" "$@" | "{sed}" {script}\n')
+
+
+def test_mafft_runs_in_its_own_directory_and_never_reads_the_servers_stdin(
+    monkeypatch, tmp_path
+):
+    """The server's stdin is the MCP stream. A child that inherited it could
+    read protocol bytes; so MAFFT, and `mafft --version`, get /dev/null. The
+    input goes to MAFFT as `input.fasta` in a private `phylokit-mafft-` dir
+    that is also its working directory, and is gone afterwards."""
+    real = shutil.which("mafft")
+    assert real
+    log = tmp_path / "log"
+    log.mkdir()
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    _stand_in(
+        shim,
+        f'if [ "$1" = --version ]; then cat > "{log}/stdin_version"; '
+        f'exec "{real}" "$@"; fi\n'
+        f'cat > "{log}/stdin_align"\npwd > "{log}/cwd"\n'
+        f'for a in "$@"; do last="$a"; done\nprintf %s "$last" > "{log}/input"\n'
+        f'exec "{real}" "$@"\n',
+    )
+    # Positive control: the stand-in does record a stdin it is given.
+    subprocess.run([str(shim / "mafft"), "--version"], input=b"probe", check=False)
+    assert (log / "stdin_version").read_bytes() == b"probe"
+
+    monkeypatch.setenv("PATH", str(shim) + os.pathsep + os.environ["PATH"])
+    fasta = ">a\nACGTACGTACGGTT\n>b\nACGTACGTTTGG\n"
+    r, w = os.pipe()
+    os.write(w, b"PROTOCOL BYTES\n")
+    os.close(w)
+    saved = os.dup(0)
+    os.dup2(r, 0)
+    try:
+        out = align_sequences(fasta)
+    finally:
+        os.dup2(saved, 0)
+        os.close(saved)
+        os.close(r)
+
+    assert (log / "stdin_align").read_bytes() == b""
+    assert (log / "stdin_version").read_bytes() == b""
+    infile = Path((log / "input").read_text())
+    assert infile.name == "input.fasta"
+    assert infile.parent.name.startswith("phylokit-mafft-")
+    assert Path((log / "cwd").read_text().strip()).resolve() == infile.parent.resolve()
+    assert not infile.parent.exists()
+    assert parse_fasta(out["fasta"])["b"].replace("-", "") == "ACGTACGTTTGG"
+
+
+def test_mafft_failures_report_the_last_4000_characters_and_six_names(
+    monkeypatch, tmp_path
+):
+    seqs = _eight()
+    names = list(seqs)
+    tail = "".join(str(i % 10) for i in range(5000))
+    real_path = os.environ["PATH"]
+
+    crash = tmp_path / "crash"
+    crash.mkdir()
+    monkeypatch.setenv("PATH", _stand_in(crash, f"printf %s '{tail}' >&2\nexit 1\n"))
+    with pytest.raises(msa.MafftFailedError) as exc:
+        msa.align(seqs)
+    assert str(exc.value).startswith("MAFFT exited 1. Command: [")
+    assert str(exc.value).endswith(f"]. stderr:\n{tail[-4000:]}")
+
+    garbled = tmp_path / "garbled"
+    garbled.mkdir()
+    monkeypatch.setenv(
+        "PATH",
+        _stand_in(garbled, f"printf 'not fasta\\n'\nprintf %s '{tail}' >&2\nexit 0\n"),
+    )
+    with pytest.raises(AlignmentError) as why:
+        parse_fasta("not fasta\n")
+    with pytest.raises(msa.MafftFailedError) as exc:
+        msa.align(seqs)
+    assert str(exc.value) == (
+        f"MAFFT exited 0 but its output is not FASTA ({why.value}). "
+        f"stderr:\n{tail[-4000:]}"
+    )
+
+    monkeypatch.setenv("PATH", _wrapping(tmp_path, "renamed", "'s/^>/>x/'", real_path))
+    with pytest.raises(msa.MafftFailedError) as exc:
+        msa.align(seqs)
+    assert str(exc.value) == (
+        f"MAFFT returned names {['x' + n for n in names][:6]} for input names "
+        f"{names[:6]}; names or order were not preserved."
+    )
+
+    monkeypatch.setenv(
+        "PATH", _wrapping(tmp_path, "altered", "'2y/ACGT/CGTA/'", real_path)
+    )
+    with pytest.raises(msa.MafftFailedError) as exc:
+        msa.align(seqs)
+    assert str(exc.value) == (
+        "MAFFT's row for 's0', with gaps removed, is not the input sequence: "
+        "residues were altered or dropped."
+    )
+
+    monkeypatch.setenv("PATH", _wrapping(tmp_path, "ragged", "'$s/$/-/'", real_path))
+    with pytest.raises(msa.MafftFailedError) as exc:
+        msa.align(seqs)
+    assert str(exc.value) == "MAFFT returned rows of unequal length."
+
+    hang = tmp_path / "hang"
+    hang.mkdir()
+    with monkeypatch.context() as m:
+        m.setenv("PATH", _stand_in(hang, "exec /bin/sleep 5\n"))
+        m.setattr(msa, "TIMEOUT_SECONDS", 0.5)
+        with pytest.raises(AlignmentError) as exc:
+            msa.align(seqs)
+    assert str(exc.value) == (
+        "MAFFT did not finish within 0.5 s on 8 sequences. This server is "
+        "synchronous; align an input this large outside it."
+    )
+
+    # Positive control: the real binary, on the same input and the default
+    # molecule type, passes every check above.
+    monkeypatch.setenv("PATH", real_path)
+    aligned = msa.align(seqs)
+    assert list(aligned) == names
+    assert {nm: row.replace("-", "") for nm, row in aligned.items()} == seqs
+
+
+def test_a_version_that_exits_1_is_still_read(monkeypatch, tmp_path):
+    """Some builds print the version to stderr and exit 1; that is an answer."""
+    real_path = os.environ["PATH"]
+    one = tmp_path / "one"
+    one.mkdir()
+    monkeypatch.setenv(
+        "PATH", _stand_in(one, "echo 'v7.999 (2099/01/01)' >&2\nexit 1\n")
+    )
+    assert msa.mafft_version() == "v7.999 (2099/01/01)"
+    monkeypatch.setenv("PATH", real_path)
+    assert msa.mafft_version().startswith("v")
+
+
+def test_align_sequences_refusal_names_its_arguments():
+    with pytest.raises(InputFileError) as exc:
+        align_sequences()
+    assert str(exc.value) == (
+        "Give fasta (the text inline) or fasta_path (the path of a file)."
+    )
+    assert align_sequences(">a\nACGTACGTAC\n>b\nACGTACTAC\n")["fasta"]
+
+
+def test_align_sequences_advises_on_the_aligned_rows_and_the_thread_state(
+    monkeypatch,
+):
+    dup = ">A\nACGTACGTACGG\n>B\nACGTACGTACGG\n>C\nACGAACGTTCGG\n>D\nTCGAACGTTAGG\n"
+    for pinned in (True, False):
+        monkeypatch.setattr(engine, "threads_pinned", lambda pinned=pinned: pinned)
+        codes = [w["code"] for w in align_sequences(dup)["warnings"]]
+        assert "duplicate_sequences" in codes
+        assert ("threads_not_pinned" in codes) is not pinned
+
+
+def test_ready_for_infer_tree_checks_protein_as_protein_and_says_why_not():
+    prot = (
+        ">A\nMKLVWQERTYAAGG\n>B\nMKLVWQERTFAAGG\n"
+        ">C\nMKLAWQDRTFAAGH\n>D\nMRLAWQDKTFAAGH\n"
+    )
+    out = align_sequences(prot, sequence_type="protein")
+    assert out["ready_for_infer_tree"] is True
+    assert "infer_tree_would_refuse" not in {w["code"] for w in out["warnings"]}
+
+    same = "".join(f">{t}\nACGTACGTACGTACGT\n" for t in "ABCD")
+    out = align_sequences(same)
+    aligned = parse_fasta(out["fasta"])
+    validate(aligned, "dna")
+    with pytest.raises(AlignmentError) as why:
+        require_phylogenetic_signal(aligned, "dna")
+    assert out["ready_for_infer_tree"] is False
+    assert {"code": "infer_tree_would_refuse", "message": str(why.value)} in out[
+        "warnings"
+    ]
+
+    out = align_sequences(">a\nACGTACGTAC\n>b\nACGTACTAC\n")
+    assert out["ready_for_infer_tree"] is False
+    assert {
+        "code": "too_few_taxa_for_a_tree",
+        "message": (
+            "2 sequences were aligned, but infer_tree needs at least 4: an "
+            "unrooted tree on fewer has only one topology."
+        ),
+    } in out["warnings"]
