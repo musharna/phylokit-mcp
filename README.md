@@ -18,8 +18,10 @@ bootstrap and returns per-clade support. There is no flag to skip it.
 ## Why the rule
 
 A maximum-likelihood tree looks the same whether or not the data support it.
-Measured on alignments simulated from a _known_ 7-taxon tree (JC, 100
-replicates, seed 1):
+Measured on alignments simulated from a _known_ 7-taxon tree,
+`(((A:0.05,B:0.05):0.05,(C:0.05,D:0.05):0.05):0.05,(E:0.05,F:0.05):0.05,G:0.1);`,
+with `simulate_alignment(newick, model="JC", length=sites, seed=42)` and then
+`infer_tree(fasta, model="JC", replicates=100, seed=1)`:
 
 | Sites | Informative sites | Recovered the true tree? | Lowest clade support |
 | ----: | ----------------: | ------------------------ | -------------------: |
@@ -39,9 +41,10 @@ _lowest-supported_ one in the tree.
 - **`fraction_resolved`**: the share of clades clearing 0.70. The headline
   number, before any single grouping is repeated as fact.
 - **Model runners-up with ΔAIC**, not just a winner. On the 300-site alignment
-  above, simulated under **JC**, the AIC winner is **not JC** (TPM2u and TPM2
-  tie), and several models, JC among them at ΔAIC 0.7, sit inside the
-  conventional ±2 margin (`seed=1`, piqtree 0.8.3).
+  above, simulated under **JC**, the AIC winner is **not JC** (it is TPM2u,
+  which ModelFinder scores the same as TPM2), and several models, JC among
+  them at ΔAIC 0.7, sit inside the conventional ±2 margin
+  (`select_substitution_model` with `seed=1`, piqtree 0.8.3).
 - **Length versus evidence**: `n_parsimony_informative` alongside `n_sites`. A
   10,000-site alignment of near-identical sequences supports nothing.
 
