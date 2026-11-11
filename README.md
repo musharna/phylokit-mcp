@@ -61,8 +61,12 @@ Tools that take FASTA or Newick also take a file path (`fasta_path`, or
 `trees_path` for two trees), read by the server; a relative path resolves
 against the server's working directory.
 
-The tests run real IQ-TREE and real MAFFT (no mocked engine), with 23 mutation
-checks and a real-process JSON-RPC handshake test.
+The tests run real IQ-TREE and real MAFFT, with 23 recorded mutation checks and
+a real-process JSON-RPC handshake test. A few tests replace the engine with
+scripted trees or model scores so that a count can be worked out by hand. The
+conflicting-clade advisory is one of them: its replicate trees are scripted,
+because no simulated alignment tried so far makes the real engine report a
+conflicting clade.
 
 ## Install
 

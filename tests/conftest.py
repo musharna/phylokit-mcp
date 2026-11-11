@@ -1,6 +1,9 @@
-"""Shared fixtures. No mocked engine anywhere in this suite — every test runs
-real IQ-TREE, because the failures worth catching are in what IQ-TREE actually
-returns, not in what a stub would be written to return.
+"""Shared fixtures. Most of this suite runs real IQ-TREE, because the failures
+worth catching are in what IQ-TREE actually returns, not in what a stub would
+be written to return. A few tests replace the engine with a script of trees or
+model scores, where a count has to be known in advance to be asserted exactly
+(`test_bootstrap_counts.py`, `test_support_annotation.py`, parts of
+`test_models.py`); each says so in its docstring.
 """
 
 from __future__ import annotations
