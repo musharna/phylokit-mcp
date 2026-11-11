@@ -6,6 +6,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Security
+
+- `SECURITY.md` said the server "does not open caller-supplied file paths".
+  It does: `fasta_path` and `trees_path` read, and `out_path` writes, wherever
+  the server's user can, through `../`, absolute paths, `~` or a symlinked
+  directory. The file now says what those arguments read, return and write,
+  that nothing confines them, and how to deploy with that in mind. It also
+  named v0.4.0 as the current release and said nothing caps alignment size;
+  it now lists the caps.
+
 ## [0.9.1] — 2026-11-08
 
 ### Fixed
