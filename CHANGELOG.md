@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-11-13
+
 ### Fixed
 
 - `select_substitution_model` without `models=` could name bare F81 the
@@ -25,6 +27,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   RuntimeError, which no clause caught. A path with a NUL byte gave
   CPython's "embedded null byte" without the argument's name. Both are now
   refusals that name the argument and say what to send instead.
+
+- README: the headline table said "seed 1" for both steps; the alignments
+  were simulated with seed 42 and inferred with seed 1. It now gives the tree
+  and both calls, and a test reproduces the table. It also said the suite
+  mocks no engine; a few tests script the engine's trees or model scores, and
+  it now says which.
 
 ### Security
 
