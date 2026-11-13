@@ -2,14 +2,14 @@
 
 ## Supported versions
 
-`phylokit-mcp` ships fixes against the latest released version only. The current
-release is **v0.4.0**. Please reproduce any issue on the latest release
-(`uvx phylokit-mcp` always pulls it) before reporting.
+`phylokit-mcp` ships fixes against the latest release on PyPI only. Please
+reproduce any issue on the latest release (`uvx phylokit-mcp` always pulls it)
+before reporting.
 
-| Version         | Supported          |
-| --------------- | ------------------ |
-| latest (0.4.x) | :white_check_mark: |
-| < latest        | :x:                |
+| Version        | Supported          |
+| -------------- | ------------------ |
+| latest release | :white_check_mark: |
+| older releases | :x:                |
 
 ## Reporting a vulnerability
 
@@ -32,15 +32,33 @@ embeds IQ-TREE 3 as a library.
   it is started from an argument list (never through a shell) with a fixed set
   of options, reads the sequences from a file the server writes in a private
   temporary directory, has stdin closed, and is killed at a timeout.
-- **Alignments arrive as data, not as paths.** The tools take sequence data
-  inline; the server does not open caller-supplied file paths, so it cannot be
-  steered into reading arbitrary files off the host.
+- **File paths are opened as given, with no confinement.** Every tool that
+  takes FASTA or Newick also takes a path the server opens itself
+  (`fasta_path`, `trees_path`), and `align_sequences` can write its result to
+  `out_path`. A relative path resolves against the server's working
+  directory, but nothing keeps it there: `../`, an absolute path, `~` and a
+  symlinked directory all reach any file the server's user can read, or any
+  directory it can write to.
+  - A file that parses as FASTA or Newick is returned as data: its sequence
+    names and residues (`map_positions` echoes both) or its taxon names. A
+    file that does not parse is refused, and the refusal can still carry
+    details of it, such as sequence names and lengths or the set of
+    unexpected characters. A FASTA file that does not start with `>` is refused
+    without quoting it.
+  - `out_path` only creates a new file. It refuses any name that already
+    exists, including a symlink at that name, so it cannot overwrite or follow
+    one; it never creates a directory.
+  - If the model driving the server may act on untrusted input, run the
+    server as a user that can read and write only what it should, or in a
+    container. There is no option yet to confine paths to a directory.
 - **No network access.** The server performs no outbound requests.
 - **Untrusted alignments are parsed by cogent3.** Malformed input is a parser
   concern, and parse failures surface as errors rather than being swallowed.
 
-The realistic risk here is resource exhaustion, not code execution: maximum-likelihood
-inference is CPU-bound and superlinear in taxa and sites, and nothing in the server
-caps the size of an alignment a caller may submit. A large alignment can occupy a
+The other realistic risk is resource exhaustion, not code execution. Inputs are
+capped: an alignment at 200 taxa and 100,000 sites, a file read at 32 MiB,
+bootstrap replicates at 1,000 (UFBoot2 at 10,000), and MAFFT is killed after 600 s.
+Inference itself has no time limit, and maximum-likelihood search is CPU-bound and
+superlinear in taxa and sites, so an alignment inside the caps can still occupy a
 core for a long time. Run it where that is acceptable, and prefer a bounded
 deployment if the model driving it is exposed to untrusted input.

@@ -66,6 +66,7 @@ jobs:
         run: uv run python benchmarks/perf/ratchet.py
 
       - name: Test
-        # No mocked engine anywhere in the suite, so this exercises real
-        # IQ-TREE and real MAFFT. Bootstrap replicates dominate the runtime.
+        # Most of the suite drives real IQ-TREE and real MAFFT; the few tests
+        # that script the engine say so in their docstrings. Bootstrap
+        # replicates dominate the runtime.
         run: uv run pytest -q --durations=10
