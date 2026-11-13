@@ -20,9 +20,10 @@ class Stat:
 
 
 SAME_MODEL_MESSAGE = (
-    "'F81' and 'JC' have the same log-likelihood and parameter count: they are "
-    "one model here. In IQ-TREE a bare 'F81' or 'HKY' has equal base frequencies "
-    "(F81 = JC, HKY = K2P); the textbook F81 and HKY85 are 'F81+F' and 'HKY+F'."
+    "'JC' and 'F81' have the same log-likelihood and parameter count: they are "
+    "one model here. ModelFinder scores a bare 'F81', 'HKY', 'TN' or 'GTR' with "
+    "equal base frequencies (F81 = JC, HKY = K2P, TN = TNe, GTR = SYM); the "
+    "textbook F81 and HKY85 are 'F81+F' and 'HKY+F'."
 )
 
 

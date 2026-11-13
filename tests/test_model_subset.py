@@ -51,6 +51,20 @@ def test_textbook_names_resolve_and_bare_f81_is_flagged(hky_fasta):
     assert not [w for w in clean["warnings"] if w["code"] == "same_model_two_names"]
 
 
+def test_twins_a_hair_apart_in_likelihood_are_still_one_model(fasta_easy):
+    """On the suite's seed-42 alignment the engine scores F81 and JC 1e-6 apart
+    in log-likelihood (measured 2026-11-10). An exact comparison called them
+    two models and said nothing."""
+    sub = select_substitution_model(fasta_easy, criterion="AIC", models=["JC", "F81"])
+    lnl = {m["model"]: m["log_likelihood"] for m in sub["ranking"]}
+    assert abs(lnl["JC"] - lnl["F81"]) < 1e-3
+    same = [w for w in sub["warnings"] if w["code"] == "same_model_two_names"]
+    assert [set(w["models"]) for w in same] == [{"JC", "F81"}]
+    # Positive control: JC and K2P differ by a parameter and stay two models.
+    clean = select_substitution_model(fasta_easy, criterion="AIC", models=["JC", "K2P"])
+    assert not [w for w in clean["warnings"] if w["code"] == "same_model_two_names"]
+
+
 def test_an_unknown_name_is_refused_not_dropped(hky_fasta):
     assert (
         select_substitution_model(hky_fasta, models=["GTR+F"])["best_model"] == "GTR+F"

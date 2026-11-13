@@ -454,6 +454,72 @@ def test_select_model_ties_at_exactly_the_margin_and_trims_to_top_n(monkeypatch)
     assert len(select_model(DNA20, top_n=6)["ranking"]) == 6
 
 
+def _same_model(a: str, b: str) -> dict:
+    return {
+        "code": "same_model_two_names",
+        "message": (
+            f"{a!r} and {b!r} have the same log-likelihood and parameter count: "
+            "they are one model here. ModelFinder scores a bare 'F81', 'HKY', 'TN' "
+            "or 'GTR' with equal base frequencies (F81 = JC, HKY = K2P, TN = TNe, "
+            "GTR = SYM); the textbook F81 and HKY85 are 'F81+F' and 'HKY+F'."
+        ),
+        "models": [a, b],
+    }
+
+
+def test_the_default_ranking_says_when_two_names_it_shows_are_one_model(
+    monkeypatch,
+):
+    """Without `models=`, F81 could be named the winner over JC at delta 0 with
+    nothing saying they are one model (audit 2026-11-10). F81 and JC here differ
+    by 5e-7 in log-likelihood, as twins do in real fits (1e-6 measured); TNe is
+    0.002 off at the same parameter count, a different model. HKY and K2P are
+    twins too, but below the cut, so they are not the reply's business."""
+    stats = {
+        "F81": FakeStat(-100.0, 9),
+        "JC": FakeStat(-100.0000005, 9),
+        "TNe": FakeStat(-100.002, 9),
+        "HKY": FakeStat(-100.5, 10),
+        "K2P": FakeStat(-100.5, 10),
+    }
+    _scripted_model_finder(monkeypatch, stats)
+    result = select_model(DNA20, top_n=3)
+    assert [m["model"] for m in result["ranking"]] == ["F81", "JC", "TNe"]
+    assert result["model_warnings"] == [_same_model("F81", "JC")]
+    # A twin below the cut is still named when its partner is shown.
+    assert select_model(DNA20, top_n=1)["model_warnings"] == [_same_model("F81", "JC")]
+    # Both pairs once both are shown; and the restricted path agrees.
+    assert select_model(DNA20, top_n=5)["model_warnings"] == [
+        _same_model("F81", "JC"),
+        _same_model("HKY", "K2P"),
+    ]
+    restricted = select_model(DNA20, models=["JC", "F81", "TNe"])
+    assert restricted["model_warnings"] == [_same_model("JC", "F81")]
+    # Positive control: models that are not twins raise nothing.
+    del stats["JC"], stats["K2P"]
+    assert select_model(DNA20, top_n=5)["model_warnings"] == []
+
+
+def test_the_default_ranking_flags_f81_beating_jc_on_jc_data():
+    """Real engine. Simulated under JC (seed 1, 300 sites), the default call
+    ranks bare F81 first and JC second at delta 0: the same model under two
+    names. Before 2026-11-10 only `models=` said so."""
+    fasta = simulate_alignment(TRUE_NEWICK, model="JC", length=300, seed=1)["fasta"]
+    result = select_substitution_model(fasta=fasta, criterion="AIC", seed=1)
+    assert [m["model"] for m in result["ranking"][:2]] == ["F81", "JC"]
+    same = [w for w in result["warnings"] if w["code"] == "same_model_two_names"]
+    assert {frozenset(w["models"]) for w in same} >= {frozenset({"F81", "JC"})}
+    # Every pair named is two names the engine scored identically, and is one
+    # of IQ-TREE's equal-frequency twins, never two models that merely tie.
+    twins = {"F81": "JC", "HKY": "K2P", "TN": "TNe", "GTR": "SYM", "TPM2u": "TPM2"}
+    twins.update({"TPM3u": "TPM3", "TIM": "TIMe", "TVM": "TVMe"})
+    for w in same:
+        a, b = sorted(w["models"], key=lambda n: n.split("+")[0] in twins)
+        base_a, _, rest_a = a.partition("+")
+        base_b, _, rest_b = b.partition("+")
+        assert rest_a == rest_b and twins[base_b] == base_a, w["models"]
+
+
 def test_select_model_refusals_say_what_to_do(monkeypatch):
     _scripted_model_finder(monkeypatch, {})
     with pytest.raises(ValueError) as exc:
