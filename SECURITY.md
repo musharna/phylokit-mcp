@@ -32,13 +32,26 @@ embeds IQ-TREE 3 as a library.
   it is started from an argument list (never through a shell) with a fixed set
   of options, reads the sequences from a file the server writes in a private
   temporary directory, has stdin closed, and is killed at a timeout.
-- **File paths are opened as given, with no confinement.** Every tool that
+- **File paths are opened as given unless you set roots.** Every tool that
   takes FASTA or Newick also takes a path the server opens itself
   (`fasta_path`, `trees_path`), and `align_sequences` can write its result to
-  `out_path`. A relative path resolves against the server's working
+  `out_path`. By default a relative path resolves against the server's working
   directory, but nothing keeps it there: `../`, an absolute path, `~` and a
   symlinked directory all reach any file the server's user can read, or any
   directory it can write to.
+  - **`--root DIR` confines them.** Start the server as
+    `phylokit-mcp --root /data/alignments` (repeat the flag for more
+    directories, or set `PHYLOKIT_ROOTS`, separated by `:`; `;` on Windows).
+    Every `fasta_path` and `trees_path` must then be a file inside a root, and
+    `out_path` must create its file inside one. `..` and symlinks are followed
+    before the path is judged, so a symlink inside a root that points outside
+    is refused. The refusal names the roots and is the same whether or not the
+    outside file exists. The path is judged twice: by name before anything is
+    opened, and again on the descriptor the server opened, so a path re-pointed
+    between the two is refused before a byte is read or a file is created.
+    The second check needs Linux or macOS; elsewhere a server with roots set
+    refuses every path. Roots cover the paths a caller passes. MAFFT's private
+    temporary directory is the server's own and is not inside them.
   - A file that parses as FASTA or Newick is returned as data: its sequence
     names and residues (`map_positions` echoes both) or its taxon names. A
     file that does not parse is refused, and the refusal can still carry
@@ -48,9 +61,9 @@ embeds IQ-TREE 3 as a library.
   - `out_path` only creates a new file. It refuses any name that already
     exists, including a symlink at that name, so it cannot overwrite or follow
     one; it never creates a directory.
-  - If the model driving the server may act on untrusted input, run the
-    server as a user that can read and write only what it should, or in a
-    container. There is no option yet to confine paths to a directory.
+  - If the model driving the server may act on untrusted input, set `--root`,
+    and run the server as a user that can read and write only what it should,
+    or in a container.
 - **No network access.** The server performs no outbound requests.
 - **Untrusted alignments are parsed by cogent3.** Malformed input is a parser
   concern, and parse failures surface as errors rather than being swallowed.

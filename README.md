@@ -99,6 +99,12 @@ wheel. `align_sequences` also needs the
 If `uvx` picks a Python older than 3.12, use
 `"args": ["--python", "3.12", "phylokit-mcp"]`.
 
+By default the server opens any path its user can. To confine `fasta_path`,
+`trees_path` and `out_path` to your data, add `--root DIR` (repeatable, or set
+`PHYLOKIT_ROOTS`): `"args": ["phylokit-mcp", "--root", "/data/alignments"]`.
+A path outside the roots is refused by name; see
+[SECURITY.md](https://github.com/musharna/phylokit-mcp/blob/main/SECURITY.md).
+
 ## What the benchmark shows
 
 Claude with the server was compared with Claude writing Python in an environment we set up with

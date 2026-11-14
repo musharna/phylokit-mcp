@@ -6,6 +6,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **`--root DIR` confines the paths the server opens.** Until now
+  `fasta_path`, `trees_path` and `out_path` reached any file the server's user
+  could read, or any directory it could write to. Started as
+  `phylokit-mcp --root /data/alignments` (repeatable; or `PHYLOKIT_ROOTS`,
+  `os.pathsep`-separated), the server reads only files inside a root and
+  creates `out_path` only inside one. `..` and symlinks are followed before
+  the path is judged. A path outside is refused with the roots named, and the
+  refusal is the same whether or not the outside file exists. The path is
+  judged by name and again on the descriptor that was opened, so one
+  re-pointed between the two is refused before anything is read or created.
+  Off by default: without the flag or the variable nothing changes.
+
 ## [0.9.2] — 2026-11-13
 
 ### Fixed
