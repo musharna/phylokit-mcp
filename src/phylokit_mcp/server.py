@@ -974,6 +974,28 @@ def build_server() -> MCPServer:
 
 
 def main() -> None:
+    import argparse
+
+    from .roots import ENV as roots_env
+    from .roots import set_roots
+
+    parser = argparse.ArgumentParser(
+        prog="phylokit-mcp",
+        description="Phylogenetic inference as an MCP server (stdio).",
+    )
+    parser.add_argument(
+        "--root",
+        action="append",
+        metavar="DIR",
+        help=(
+            "only open fasta_path and trees_path files, and only create out_path "
+            f"files, under DIR (repeatable; also {roots_env}, os.pathsep-separated). "
+            "Unset: open any path the host user can."
+        ),
+    )
+    args = parser.parse_args()
+    if args.root:
+        set_roots(args.root)
     build_server().run()
 
 
