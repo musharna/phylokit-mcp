@@ -341,7 +341,13 @@ def _compare_over_stdio(extra_args: list[str], cwd, paths: list[str]) -> list[di
             ]
         finally:
             proc.stdin.close()
-            proc.wait(timeout=30)
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                # A server that ignores EOF must not outlive the test.
+                proc.kill()
+                proc.wait()
+                raise
 
 
 def test_a_real_server_started_with_root_reads_only_inside_it(dirs):
