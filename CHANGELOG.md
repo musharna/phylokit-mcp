@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-11-15
+
 ### Added
 
 - **`--root DIR` confines the paths the server opens.** Until now
@@ -19,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   judged by name and again on the descriptor that was opened, so one
   re-pointed between the two is refused before anything is read or created.
   Off by default: without the flag or the variable nothing changes.
+
+### Changed
+
+- `phylokit-mcp` now reads its command line: `--help` prints usage, and an
+  argument it does not know is an error (exit 2) where it used to be ignored.
+  A client config that passes extra arguments to the server must drop them.
+
+### Security
+
+- `uv.lock` pins opentelemetry-api 1.45.2 (was 1.45.1) for GHSA-mf5v-w3w3-f6cg,
+  fixed in 1.45.2. The lock is what checkouts and CI install; a `uvx` install
+  resolves its own.
 
 ## [0.9.2] — 2026-11-13
 
